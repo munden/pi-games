@@ -317,7 +317,7 @@ void fx_draw(void)
             float grow = prog < 0.35f ? smooth01(prog / 0.35f) : 1.0f - 0.25f * smooth01((prog - 0.35f) / 0.65f);
             float s = q->size * grow * (0.4f + 0.6f * grow), a = prog < 0.5f ? 1.0f : 1.0f - smooth01((prog - 0.5f) / 0.5f);
             pg3d_sprite(t_sparkle, q->p, s, s, q->rot, shade(q->c, 1.0f, a), 0);
-            pg3d_sprite(t_sparkle, pg_v3(q->p.x, q->p.y, q->p.z + 2.0f), s * 0.62f, s * 0.62f, -q->rot * 0.7f, pg_rgba(255, 255, 255, (uint8_t)(a * 255.0f)), PG3D_ADDITIVE);
+            pg3d_sprite(t_sparkle, pg_v3(q->p.x, q->p.y, q->p.z + 2.0f), s * 0.62f, s * 0.62f, -q->rot * 0.7f, pg_rgba(255, 255, 255, (uint8_t)(a * 190.0f)), PG3D_ADDITIVE);
             break; }
         default: break;
         }
@@ -343,7 +343,7 @@ void fx_touch_glow(const PG_Touch *t, float strength)
     float wx, wy;
     cam_unproject(t->x, t->y, z, &wx, &wy);
     float k = (cm->dist - z) / cm->focal;
-    float pulse = 0.5f + 0.5f * sinf(pg_time() * 7.0f + (float)t->id), pop = smooth01((float)(t->ticks + 1) / 7.0f) * strength;
+    float pulse = 0.5f + 0.5f * sinf(pg_time() * 7.0f + (float)t->id), pop = (0.5f + 0.5f * smooth01((float)t->ticks / 6.0f)) * strength;          /* already half size on the very first frame */
     PG_Color hc = pg_hsv(fmodf(30.0f + 47.0f * (float)t->id, 360.0f), 0.62f, 1.0f);
     float g = 168.0f * k * (0.85f + 0.15f * pulse) * pop, rg = 82.0f * k * (1.0f + 0.07f * pulse) * pop;
     pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(wx, wy, z), g, g, 0, pg_rgba(hc.r, hc.g, hc.b, (uint8_t)(170.0f * strength)), 0);

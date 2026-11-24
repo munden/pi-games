@@ -100,7 +100,7 @@ typedef struct Ghost {                /* a block that is not a physics body righ
     float ang, spin;
 } Ghost;
 
-enum { PT_NONE, PT_STAR, PT_DUST, PT_GLOW };
+enum { PT_NONE, PT_STAR, PT_DUST };
 typedef struct Part {
     PG_V3 p, v;
     float life, max, size, grow, rot, spin, hue;
@@ -143,7 +143,6 @@ typedef struct Meshes {
 
 typedef struct Game {
     PG_World *w;
-    PG_Body *chest;
     Block blocks[MAX_BLOCKS];
     Ghost ghosts[MAX_GHOSTS];
     Part parts[MAX_PARTS];
@@ -182,15 +181,10 @@ void meshes_free(Game *g);
 void play_init(Game *g);
 void play_shutdown(Game *g);
 void play_update(Game *g);
-int  play_box_count(const Game *g);
 
 /* scene.c */
 PG_Camera scene_camera(float t);
 void scene_render(Game *g, SDL_Renderer *r);
 void scene_textures(Game *g);
-
-/* shared helpers implemented in play.c and used by the scene */
-void fx_stars(Game *g, float x, float y, float z, int n, float speed, float size);
-void fx_dust(Game *g, float x, float y, float z, int n, float size);
 
 #endif

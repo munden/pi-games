@@ -22,6 +22,7 @@ typedef struct { float sx, sy, r, t; } Poke;                         /* a tickli
 typedef struct { bool on, btn, has_last; float hue, lx, ly; } Finger;
 typedef struct { PG_V3 p, v; float life, max, hue, size, rot; uint8_t kind; } Fx;   /* kind 0 star, 1 puff */
 
+static Art    A;                                                      /* every texture and mesh */
 static Poke   pokes[P_COUNT];
 static Finger fing[PG_MAX_TOUCH];
 static Fx     fx[MAX_FX];
@@ -78,7 +79,7 @@ static bool chime(int step, float vol)             /* at most one every 16 ticks
 /* ---------------------------------------------------------------------- init */
 static int init(SDL_Renderer *r)
 {
-    art_init();
+    art_init(&A);
     sand_init(r, pg_rand());
     pg3d_sky(pg_hex(0x5DB8F2), pg_hex(0xE6F6F4));
     pg3d_light(pg_v3(-0.43f, 0.72f, 0.53f), pg_hex(0xB8B0A0), pg_hex(0x707C98), pg_hex(0x7A6C5C));
@@ -93,7 +94,7 @@ static int init(SDL_Renderer *r)
 static void shutdown(void)
 {
     sand_shutdown();
-    art_shutdown();
+    art_shutdown(&A);
 }
 
 /* -------------------------------------------------------------------- update */

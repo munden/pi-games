@@ -35,7 +35,7 @@ static Part *part_alloc(Game *g)
     return best;       /* full: steal the one closest to its end */
 }
 
-void fx_stars(Game *g, float x, float y, float z, int n, float speed, float size)
+static void fx_stars(Game *g, float x, float y, float z, int n, float speed, float size)
 {
     for (int i = 0; i < n; i++) {
         Part *p = part_alloc(g);
@@ -47,7 +47,7 @@ void fx_stars(Game *g, float x, float y, float z, int n, float speed, float size
     }
 }
 
-void fx_dust(Game *g, float x, float y, float z, int n, float size)
+static void fx_dust(Game *g, float x, float y, float z, int n, float size)
 {
     for (int i = 0; i < n; i++) {
         Part *p = part_alloc(g);
@@ -110,7 +110,7 @@ static Block *add_ball(Game *g, int which, float x, float y)
     return b;
 }
 
-int play_box_count(const Game *g)
+static int play_box_count(const Game *g)
 {
     int n = 0;
     for (int i = 0; i < MAX_BLOCKS; i++) n += g->blocks[i].body && g->blocks[i].kind == KIND_BOX;
@@ -857,7 +857,7 @@ void play_init(Game *g)
     static_box(g, -WALL_X - 100, 0, 100, 800);                  /* left wall */
     static_box(g, WALL_X + 100, 0, 100, 800);                   /* right wall */
     static_box(g, 0, CEIL_Y + 100, 900, 100);                   /* ceiling */
-    g->chest = static_box(g, CHEST_X, CHEST_Y, CHEST_HX, CHEST_HY);
+    static_box(g, CHEST_X, CHEST_Y, CHEST_HX, CHEST_HY);                 /* the toy chest is solid */
     g->snd_tokens = 3.0f;
     g->hand_x = 99999.0f;
     bag_fill(g);

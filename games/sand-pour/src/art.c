@@ -4,8 +4,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-Art A;
-
 #define RGB(c)   PG_RGB24(c)
 #define ARGB(a, c) PG_ARGB(a, ((c) >> 16) & 255, ((c) >> 8) & 255, (c) & 255)
 
@@ -449,73 +447,73 @@ static PG_Mesh *mesh_leaf(float len, float half_w, float droop)      /* a frond 
     return bld_done(&b);
 }
 
-void art_init(void)
+void art_init(Art *a)
 {
     /* textures */
-    A.wood_h = paint_wood(128, 16, 0, 0xE59A4A, 0xB9722E);
-    A.wood_v = paint_wood(16, 128, 1, 0xE59A4A, 0xB9722E);
-    A.post = paint_post();
-    A.wall = paint_wall();
-    A.ground = paint_ground();
-    A.sea = paint_sea();
-    A.rays = paint_rays();
-    for (int i = 0; i < 3; i++) A.sun[i] = paint_sun(i);
-    A.cloud = paint_cloud();
-    A.trunk = paint_trunk(); A.leaf = paint_leaf();
-    A.btn = paint_button();
-    A.btnbase = paint_stripes_tex(32, 8, 4, 0xFFD34A, 0xE59A18);
-    A.crate = paint_crate();
-    A.hand = paint_hand();
-    A.flower = paint_flower();
-    A.stem = paint_stem();
-    A.ball = paint_ball();
-    A.bucket = paint_bucket();
-    A.starfish = paint_starfish();
-    A.sheen = paint_sheen();
-    A.puff = paint_puff();
+    a->wood_h = paint_wood(128, 16, 0, 0xE59A4A, 0xB9722E);
+    a->wood_v = paint_wood(16, 128, 1, 0xE59A4A, 0xB9722E);
+    a->post = paint_post();
+    a->wall = paint_wall();
+    a->ground = paint_ground();
+    a->sea = paint_sea();
+    a->rays = paint_rays();
+    for (int i = 0; i < 3; i++) a->sun[i] = paint_sun(i);
+    a->cloud = paint_cloud();
+    a->trunk = paint_trunk(); a->leaf = paint_leaf();
+    a->btn = paint_button();
+    a->btnbase = paint_stripes_tex(32, 8, 4, 0xFFD34A, 0xE59A18);
+    a->crate = paint_crate();
+    a->hand = paint_hand();
+    a->flower = paint_flower();
+    a->stem = paint_stem();
+    a->ball = paint_ball();
+    a->bucket = paint_bucket();
+    a->starfish = paint_starfish();
+    a->sheen = paint_sheen();
+    a->puff = paint_puff();
 
     /* the frame: butt-jointed wooden bars (front half of the depth) with toy-block corner posts */
     const float hw = (WX1 - WX0) * 0.5f + BAR_T, hh = (WYT - WYB) * 0.5f;
-    A.bar_top = pg_mesh_bevel_box(hw, BAR_T * 0.5f, ZF * 0.5f, 8.0f);
-    A.bar_bot = pg_mesh_bevel_box(hw, BAR_B * 0.5f, ZF * 0.5f, 9.0f);
-    A.bar_l = pg_mesh_bevel_box(BAR_T * 0.5f, hh, ZF * 0.5f, 8.0f);
-    A.bar_r = pg_mesh_bevel_box(BAR_T * 0.5f, hh, ZF * 0.5f, 8.0f);
-    A.post_t = pg_mesh_bevel_box(BAR_T * 0.5f + 7.0f, BAR_T * 0.5f + 7.0f, ZF * 0.5f + 9.0f, 8.0f);
-    A.post_b = pg_mesh_bevel_box(BAR_T * 0.5f + 7.0f, BAR_B * 0.5f + 7.0f, ZF * 0.5f + 9.0f, 9.0f);
+    a->bar_top = pg_mesh_bevel_box(hw, BAR_T * 0.5f, ZF * 0.5f, 8.0f);
+    a->bar_bot = pg_mesh_bevel_box(hw, BAR_B * 0.5f, ZF * 0.5f, 9.0f);
+    a->bar_l = pg_mesh_bevel_box(BAR_T * 0.5f, hh, ZF * 0.5f, 8.0f);
+    a->bar_r = pg_mesh_bevel_box(BAR_T * 0.5f, hh, ZF * 0.5f, 8.0f);
+    a->post_t = pg_mesh_bevel_box(BAR_T * 0.5f + 7.0f, BAR_T * 0.5f + 7.0f, ZF * 0.5f + 9.0f, 8.0f);
+    a->post_b = pg_mesh_bevel_box(BAR_T * 0.5f + 7.0f, BAR_B * 0.5f + 7.0f, ZF * 0.5f + 9.0f, 9.0f);
 
     /* the box behind the sand: back wall and the four inner walls */
-    A.panel = pg_mesh_quad((WX1 - WX0) * 0.5f, hh);
-    pg_mesh_gradient_y(A.panel, pg_rgb(255, 255, 255), pg_rgb(196, 204, 232));
-    A.tun_l = mesh_quad3(pg_v3(WX0, WYB, -ZB), pg_v3(WX0, WYB, 0), pg_v3(WX0, WYT, 0), pg_v3(WX0, WYT, -ZB), pg_v3(1, 0, 0));
-    A.tun_r = mesh_quad3(pg_v3(WX1, WYB, 0), pg_v3(WX1, WYB, -ZB), pg_v3(WX1, WYT, -ZB), pg_v3(WX1, WYT, 0), pg_v3(-1, 0, 0));
-    A.tun_t = mesh_quad3(pg_v3(WX0, WYT, 0), pg_v3(WX1, WYT, 0), pg_v3(WX1, WYT, -ZB), pg_v3(WX0, WYT, -ZB), pg_v3(0, -1, 0));
-    A.tun_b = mesh_quad3(pg_v3(WX0, WYB, -ZB), pg_v3(WX1, WYB, -ZB), pg_v3(WX1, WYB, 0), pg_v3(WX0, WYB, 0), pg_v3(0, 1, 0));
+    a->panel = pg_mesh_quad((WX1 - WX0) * 0.5f, hh);
+    pg_mesh_gradient_y(a->panel, pg_rgb(255, 255, 255), pg_rgb(196, 204, 232));
+    a->tun_l = mesh_quad3(pg_v3(WX0, WYB, -ZB), pg_v3(WX0, WYB, 0), pg_v3(WX0, WYT, 0), pg_v3(WX0, WYT, -ZB), pg_v3(1, 0, 0));
+    a->tun_r = mesh_quad3(pg_v3(WX1, WYB, 0), pg_v3(WX1, WYB, -ZB), pg_v3(WX1, WYT, -ZB), pg_v3(WX1, WYT, 0), pg_v3(-1, 0, 0));
+    a->tun_t = mesh_quad3(pg_v3(WX0, WYT, 0), pg_v3(WX1, WYT, 0), pg_v3(WX1, WYT, -ZB), pg_v3(WX0, WYT, -ZB), pg_v3(0, -1, 0));
+    a->tun_b = mesh_quad3(pg_v3(WX0, WYB, -ZB), pg_v3(WX1, WYB, -ZB), pg_v3(WX1, WYB, 0), pg_v3(WX0, WYB, 0), pg_v3(0, 1, 0));
 
     /* scenery */
-    A.ground_tile = pg_mesh_floor(250, 250, 4, 4);
-    A.sea_quad = pg_mesh_quad(1600, 200);
-    A.trunk_seg = pg_mesh_cylinder(10.0f, 20.0f, 10);
-    A.leaf_m = mesh_leaf(112.0f, 24.0f, 34.0f);
-    A.coconut_m = pg_mesh_sphere(8.0f, 12, 8);
-    A.crate_m = pg_mesh_bevel_box(62.0f, 58.0f, 42.0f, 11.0f);
-    A.btn_cap = mesh_button_cap(47.0f, 9.0f, 24);
-    A.btn_ring = pg_mesh_cylinder(55.0f, 5.0f, 24);
-    A.ball_m = pg_mesh_sphere(30.0f, 14, 10);
-    A.bucket_m = mesh_frustum(21.0f, 29.0f, 24.0f, 14);
-    A.bucket_cap = mesh_disc(27.0f, 14);
-    A.stem_m = pg_mesh_cylinder(2.4f, 20.0f, 6);
-    A.decal = pg_mesh_quad(1.0f, 1.0f);
-    A.spade_h = pg_mesh_bevel_box(3.0f, 30.0f, 3.0f, 1.2f);
-    A.spade_b = pg_mesh_bevel_box(10.0f, 13.0f, 2.2f, 1.6f);
-    A.slot_m = A.decal;
-    A.trim = mesh_rainbow((WX1 - WX0) * 0.5f - 12.0f, 5.5f, 24);
+    a->ground_tile = pg_mesh_floor(250, 250, 4, 4);
+    a->sea_quad = pg_mesh_quad(1600, 200);
+    a->trunk_seg = pg_mesh_cylinder(10.0f, 20.0f, 10);
+    a->leaf_m = mesh_leaf(112.0f, 24.0f, 34.0f);
+    a->coconut_m = pg_mesh_sphere(8.0f, 12, 8);
+    a->crate_m = pg_mesh_bevel_box(62.0f, 58.0f, 42.0f, 11.0f);
+    a->btn_cap = mesh_button_cap(47.0f, 9.0f, 24);
+    a->btn_ring = pg_mesh_cylinder(55.0f, 5.0f, 24);
+    a->ball_m = pg_mesh_sphere(30.0f, 14, 10);
+    a->bucket_m = mesh_frustum(21.0f, 29.0f, 24.0f, 14);
+    a->bucket_cap = mesh_disc(27.0f, 14);
+    a->stem_m = pg_mesh_cylinder(2.4f, 20.0f, 6);
+    a->decal = pg_mesh_quad(1.0f, 1.0f);
+    a->spade_h = pg_mesh_bevel_box(3.0f, 30.0f, 3.0f, 1.2f);
+    a->spade_b = pg_mesh_bevel_box(10.0f, 13.0f, 2.2f, 1.6f);
+    a->slot_m = a->decal;
+    a->trim = mesh_rainbow((WX1 - WX0) * 0.5f - 12.0f, 5.5f, 24);
 }
 
-void art_shutdown(void)
+void art_shutdown(Art *a)
 {
-    PG_Mesh **list[] = { &A.bar_top, &A.bar_bot, &A.bar_l, &A.bar_r, &A.post_t, &A.post_b, &A.panel, &A.tun_l, &A.tun_r, &A.tun_t, &A.tun_b,
-                         &A.ground_tile, &A.sea_quad, &A.trunk_seg, &A.leaf_m, &A.coconut_m, &A.crate_m, &A.btn_cap, &A.btn_ring, &A.ball_m,
-                         &A.bucket_m, &A.bucket_cap, &A.stem_m, &A.decal, &A.spade_h, &A.spade_b, &A.trim };
+    PG_Mesh **list[] = { &a->bar_top, &a->bar_bot, &a->bar_l, &a->bar_r, &a->post_t, &a->post_b, &a->panel, &a->tun_l, &a->tun_r, &a->tun_t, &a->tun_b,
+                         &a->ground_tile, &a->sea_quad, &a->trunk_seg, &a->leaf_m, &a->coconut_m, &a->crate_m, &a->btn_cap, &a->btn_ring, &a->ball_m,
+                         &a->bucket_m, &a->bucket_cap, &a->stem_m, &a->decal, &a->spade_h, &a->spade_b, &a->trim };
     for (size_t i = 0; i < sizeof list / sizeof *list; i++) { pg_mesh_free(*list[i]); *list[i] = NULL; }
-    A.slot_m = NULL;
+    a->slot_m = NULL;
 }

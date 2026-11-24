@@ -29,9 +29,7 @@ typedef struct {
     PG_Mesh *bucket_m, *bucket_cap, *stem_m, *decal, *spade_h, *spade_b, *slot_m, *trim;
 } Art;
 
-extern Art A;
-
-void art_init(void);
-void art_shutdown(void);
+void art_init(Art *a);                  /* paints every texture and builds every mesh into *a */
+void art_shutdown(Art *a);
 
 #endif

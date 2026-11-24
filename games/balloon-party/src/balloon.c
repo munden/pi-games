@@ -387,8 +387,11 @@ void balloons_update(float t)
                 b->vy = b->vy > 40 ? -b->vy * 0.5f : 0;
             }
         }
-        /* squash spring (jelly), roll spring (a pendulum leaning into the motion) */
-        b->sqv += (-340.0f * b->sq - 2.0f * 0.2f * 18.4f * b->sqv) * DT;
+        /* squash spring (jelly) with a slight rest flattening while pressed against the ceiling; roll spring (a pendulum
+         * leaning into the motion) */
+        float sq_rest = 0.0f;
+        if (b->y >= ymax - 1.0f && b->vy > -8.0f) { sq_rest = -0.07f; if (fabsf(b->sq) < 0.1f) b->sqa = PG_PI * 0.5f; }
+        b->sqv += (-340.0f * (b->sq - sq_rest) - 2.0f * 0.2f * 18.4f * b->sqv) * DT;
         b->sq += b->sqv * DT;
         b->sq = clampf(b->sq, -0.42f, 0.5f);
         float tt = clampf(-b->vx * 0.0018f, -0.45f, 0.45f);
