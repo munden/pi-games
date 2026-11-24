@@ -15,6 +15,5 @@ void fx_confetti(float x, float y, float z, int n, float speed);
 void fx_bubble(float x, float y, float z, float size, float rise);
 void fx_glow(float x, float y, float z, float size, PG_Color c, float life);   /* additive pulse that swells and fades */
 void fx_draw_bubble(float x, float y, float z, float size, float alpha);        /* one bubble sprite for this frame only */
-int  fx_count(void);
 
 #endif

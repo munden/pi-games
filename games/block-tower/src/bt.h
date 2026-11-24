@@ -64,7 +64,6 @@ static inline const ShapeDef *bt_shape(int type)
 
 static inline float bt_ball_r(int which) { return which ? 44.0f : 54.0f; }   /* the two big soft balls */
 static inline float bt_clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
-static inline float bt_lerpf(float a, float b, float t) { return a + (b - a) * t; }
 
 /* a raining block accelerates to RAIN_V and then falls at that speed */
 static inline float bt_fall_time(float d)
@@ -125,7 +124,7 @@ enum { PH_PLAY, PH_TIDY, PH_RAIN };
 typedef struct Textures {
     PG_Tex skin[FAM_COUNT][N_CUBE_SKINS];
     PG_Tex ball[2];
-    PG_Tex floor, wall, wainscot, rug, view, chest, button, glove, fabric;
+    PG_Tex floor, wall, wainscot, rug, view, chest, button, glove, fabric, poster;
 } Textures;
 
 typedef struct Meshes {
@@ -135,8 +134,8 @@ typedef struct Meshes {
     PG_Mesh *chest_body, *chest_lid, *chest_plate, *btn_face, *btn_rim;
     PG_Mesh *baseboard, *rail, *side_base, *side_rail, *sill;
     PG_Mesh *frame_h, *frame_v, *bar_h, *bar_v, *rod, *shelf, *bracket;
-    PG_Mesh *curtain, *mini;
-    PG_Mesh *sph, *cone, *cyl, *torus;
+    PG_Mesh *curtain, *mini, *poster, *poster_frame, *car_body, *car_cab, *wheel;
+    PG_Mesh *sph, *sph_lo, *cone, *cyl, *torus;
     PG_Mesh *all[64];                 /* registry used by meshes_free() */
     int n;
 } Meshes;
@@ -166,10 +165,11 @@ typedef struct Game {
     float lid_kick;                   /* chest lid hop 1..0 */
     float tidy_note_cd;
     int   tidy_notes;
+    int   tada;                       /* notes of the "all rebuilt" chime still to play */
+    float tada_cd;
     int   hint_taps;                  /* hint-hand taps since the last real touch */
     float hand_vis, hand_x, hand_y, hand_tx, hand_ty, hand_t, hand_tap;
     int   hand_tapped;
-    int   ghost_active;               /* ghosts alive (tidy/rain bookkeeping) */
     int   headless;                   /* software renderer: pg_frame_ms() says nothing about the Pi */
 } Game;
 

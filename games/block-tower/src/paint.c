@@ -528,3 +528,36 @@ PG_Image *paint_fabric(void)
     pg_img_ps1(im);
     return im;
 }
+
+PG_Image *paint_poster(void)
+{
+    PG_Image *im = pg_img_new(64, 80, C(0xA8DCFF));
+    seed(780);
+    pg_img_gradient_v(im, 0, 0, 64, 80, C(0x78C4FF), C(0xFFF0C8));
+    for (int i = 0; i < 2; i++) {
+        float cx = i ? 46.0f : 18.0f, cy = i ? 22.0f : 52.0f;
+        pg_img_disc(im, cx - 5, cy + 1, 4.5f, C(0xFFFFFF)); pg_img_disc(im, cx + 1, cy - 2, 6, C(0xFFFFFF)); pg_img_disc(im, cx + 7, cy + 1, 4.5f, C(0xFFFFFF));
+        pg_img_rect(im, (int)(cx - 9), (int)(cy + 1), 21, 4, C(0xFFFFFF));
+    }
+    for (int x = 0; x < 64; x++) {
+        float h1 = 62.0f + 5.0f * sinf((float)x * 0.11f + 0.5f), h2 = 69.0f + 4.0f * sinf((float)x * 0.17f + 3.0f);
+        pg_img_rect(im, x, (int)h1, 1, 80 - (int)h1, C(0x93D683));
+        pg_img_rect(im, x, (int)h2, 1, 80 - (int)h2, C(0x5DB86A));
+    }
+    /* the balloon: coloured gores, a basket and two ropes */
+    static const uint32_t gore[5] = { 0xE8433A, 0xFFD23F, 0x3E86E8, 0xFFD23F, 0xE8433A };
+    pg_img_disc(im, 32, 28, 16.5f, C(0xB62A22));
+    for (int j = 12; j < 46; j++)
+        for (int i = 14; i < 51; i++) {
+            float dx = (float)i + 0.5f - 32.0f, dy = (float)j + 0.5f - 28.0f;
+            if (dx * dx + dy * dy < 15.5f * 15.5f) put(im, i, j, C(gore[(int)((dx + 15.5f) / 6.3f) % 5]), 1.0f, 0);
+        }
+    pg_img_disc(im, 28, 22, 5, alpha(C(0xFFFFFF), 70));
+    tri(im, 22, 40, 42, 40, 32, 46, C(0xB62A22));
+    pg_img_line(im, 27, 44, 29, 52, 1.0f, C(0x7A5A3A)); pg_img_line(im, 37, 44, 35, 52, 1.0f, C(0x7A5A3A));
+    rrect(im, 27, 51, 10, 7, 1.5f, C(0xC8883E)); pg_img_rect(im, 27, 53, 10, 1, C(0x8A5A2C));
+    pg_img_frame(im, 0, 0, 64, 80, 2, alpha(C(0xFFFFFF), 90));
+    pg_img_noise(im, 4, 31);
+    pg_img_ps1(im);
+    return im;
+}

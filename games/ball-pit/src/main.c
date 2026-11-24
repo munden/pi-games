@@ -4,12 +4,12 @@
  * playroom, shiny painted balls that roll and squash, a rainbow arch, bunting and a swaying camera.
  *
  * How it plays (no reading, nothing can go wrong):
- *   - every finger is a big invisible-physics circle with a glowing ring: it scoops, shoves and flings balls;
- *   - a tap on a ball pops the balls around it into the air;
+ *   - every finger is a big physics circle (radius 50 px) with a glowing ring: it scoops, shoves and flings balls;
+ *   - a tap on the pile makes the balls around it hop into the air;
  *   - a tap (or a hold) on empty space makes balls drop from the beam, playing a little pentatonic tune that
  *     rises from left to right;
  *   - at most MAX_BALLS balls exist: the oldest one pops out in a puff of stars, so the pit never fills up;
- *   - left alone, balls rain gently and a pointing hand shows what to do.
+ *   - left alone, balls rain gently and a pointing hand shows what to do; touching the painted sun makes it giggle.
  *
  * Physics bodies are never added or removed while playing: every ball, finger and the hint hand owns a body made at
  * init that is "parked" (made static and moved inside the floor, where nothing can touch it) while it is not in use.
@@ -31,6 +31,8 @@
 #define IDLE_BALLS    20
 #define DROP_Q        24
 #define N_FLAGS       13
+#define SUN_X         318.0f                  /* the painted sun on the back wall */
+#define SUN_Y         150.0f
 #define MAX_SPEED     1900.0f                 /* nothing in the pit ever moves faster than this */
 
 enum { TAG_BALL = 1, TAG_WALL, TAG_FINGER };
@@ -82,6 +84,7 @@ static bool      hint_on, headless;
 static float     snd_best[CAT_N], snd_r[CAT_N];
 static uint32_t  snd_last[CAT_N];
 static PG_Camera cam_now;
+static float     sun_pulse, flag_kick, flag_phase;          /* the sun giggles when touched; flying balls rattle the bunting */
 
 static const PG_Color PALETTE[8] = {
     { 255, 66, 70, 255 }, { 255, 150, 34, 255 }, { 255, 214, 44, 255 }, { 72, 214, 98, 255 },
@@ -116,6 +119,13 @@ static void park(PG_Body *b, int slot)
     b->y = FLOOR_Y - 150.0f - (float)(slot / 9) * 100.0f;
 }
 
+/* the point at height z on the eye ray through p: where to put an effect so it lines up with p on the screen */
+static PG_V3 ray_at_z(PG_V3 p, float z)
+{
+    float s = (z - cam_now.eye.z) / (p.z - cam_now.eye.z);
+    return pg_v3_add(cam_now.eye, pg_v3_scale(pg_v3_sub(p, cam_now.eye), s));
+}
+
 /* ------------------------------------------------------------------------------------------------ sparkles */
 static void spark_add(int kind, float x, float y, float z, float vx, float vy, float life, float size, float hue)
 {
@@ -124,6 +134,13 @@ static void spark_add(int kind, float x, float y, float z, float vx, float vy, f
         sparks[i] = (Spark){ pg_v3(x, y, z), pg_v3(vx, vy, 0), life, life, size, hue, pg_rand_range(-3, 3), (uint8_t)kind };
         return;
     }
+}
+
+static int rings_alive(void)
+{
+    int n = 0;
+    for (int i = 0; i < MAX_SPARKS; i++) n += sparks[i].life > 0 && sparks[i].kind == SP_RING;
+    return n;
 }
 
 static void burst(float x, float y, int n, float hue, float speed)
@@ -280,11 +297,12 @@ static void on_contact(PG_Body *a, PG_Body *b, float speed, float x, float y, vo
     if (b->tag == TAG_BALL) squash(b->user, x, y, speed);
     if (speed > snd_best[cat]) { snd_best[cat] = speed; snd_r[cat] = ba->r; }
     if (speed > 640.0f) burst(x, y, 3, ba->hue, 170);
+    if (b->tag == TAG_WALL && y > CEIL_Y - 14.0f) flag_kick = fmaxf(flag_kick, clampf(speed / 800.0f, 0.25f, 1.0f));
 }
 
 static void sounds_play(void)
 {
-    static const uint32_t gap[CAT_N] = { 5, 7, 6 };         /* ticks between sounds of one kind */
+    static const uint32_t gap[CAT_N] = { 5, 7, 10 };         /* ticks between sounds of one kind */
     uint32_t now = (uint32_t)pg_ticks();
     for (int c = 0; c < CAT_N; c++) {
         float sp = snd_best[c];
@@ -356,9 +374,9 @@ static void rain_update(void)
         queue_drop(pg_rand_range(-WALL_X + 70, WALL_X - 70), 0, pg_rand_int(0, 9), 0.22f);
         rain_cd = 1.2f;
     } else if (idle_t > 12.0f) {                          /* nobody there: keep a slow trickle of new balls going */
-        if (live >= IDLE_BALLS + 4) { Ball *o = oldest_live(); if (o) ball_pop(o, true); }
-        queue_drop(pg_rand_range(-WALL_X + 70, WALL_X - 70), 0, pg_rand_int(0, 9), 0.2f);
-        rain_cd = 5.0f;
+        if (live >= IDLE_BALLS + 4) { Ball *o = oldest_live(); if (o) ball_pop(o, false); }     /* quietly: nobody is listening */
+        queue_drop(pg_rand_range(-WALL_X + 70, WALL_X - 70), 0, 0, 0.0f);
+        rain_cd = 7.0f;
     } else rain_cd = 0.5f;
 }
 
@@ -395,6 +413,19 @@ static void poke(float fx, float fy)                      /* a tap on the pile: 
     }
 }
 
+static void touch_sun(const PG_Touch *t)                  /* a touch on the painted sun makes it giggle */
+{
+    float sx, sy, depth;
+    if (!pg3d_project(pg_v3(SUN_X, SUN_Y, BACK_Z + 4), &sx, &sy, &depth)) return;
+    float dx = t->x - sx, dy = t->y - sy;
+    if (dx * dx + dy * dy > 62.0f * 62.0f) return;
+    sun_pulse = 1.0f;
+    pg_sfx_sparkle(0.38f);
+    PG_V3 p = ray_at_z(pg_v3(SUN_X, SUN_Y, BACK_Z + 4), 30.0f);
+    spark_add(SP_RING, p.x, p.y, 30, 0, 0, 0.8f, 190, 45);
+    for (int k = 0; k < 6; k++) spark_add(SP_STAR, p.x, p.y, 40, pg_rand_range(-200, 200), pg_rand_range(-80, 200), 0.9f, 22, pg_rand_range(30, 70));
+}
+
 static void finger_step(int i, const PG_Touch *t)
 {
     Finger *f = &fing[i];
@@ -408,7 +439,8 @@ static void finger_step(int i, const PG_Touch *t)
             f->linger = 0; f->trail = 0;
             f->pour = !touching_ball(tx, ty);
             f->body->x = tx; f->body->y = ty; f->body->vx = f->body->vy = 0;     /* the circle appears under the finger */
-            spark_add(SP_RING, tx, ty, 30, 0, 0, 0.5f, 130, 190 + 40 * (float)i);
+            if (rings_alive() < 4) spark_add(SP_RING, tx, ty, 30, 0, 0, 0.5f, 130, 190 + 40 * (float)i);    /* a flat hand: not 10 blooms */
+            touch_sun(t);
             if (f->pour) {                                /* empty space: three balls drop in a little rising tune */
                 int n0 = note_for_x(tx);
                 pg_sfx_chime(n0, 0.50f);                  /* heard on the very next frame; the balls follow */
@@ -513,6 +545,9 @@ static void update(void)
         finger_step(i, &t[i]);
     }
     idle_t = touching ? 0.0f : idle_t + PG_DT;
+    sun_pulse = fmaxf(0.0f, sun_pulse - PG_DT * 1.1f);
+    flag_kick *= 1.0f - 1.4f * PG_DT;
+    flag_phase += PG_DT * (1.5f + 3.5f * flag_kick);
     hint_update();
     rain_update();
     drops_update();
@@ -522,21 +557,6 @@ static void update(void)
     after_step();
     sounds_play();
     sparks_update();
-#ifdef BP_DEBUG
-    if (pg_ticks() % 60 == 0) {
-        float vmax = 0, vsum = 0, pen = 0; int n = 0;
-        for (int i = 0; i < POOL; i++) {
-            if (balls[i].state != B_LIVE) continue;
-            PG_Body *a = balls[i].body; float sp = pg_body_speed(a); n++; vsum += sp; if (sp > vmax) vmax = sp;
-            for (int j = i + 1; j < POOL; j++) {
-                if (balls[j].state != B_LIVE) continue;
-                PG_Body *b = balls[j].body; float d = hypotf(a->x - b->x, a->y - b->y), o = a->radius + b->radius - d; if (o > pen) pen = o;
-                if (o > 20) pg_log("  OVERLAP %.1f: ball %d (x=%.0f y=%.0f r=%.0f v=%.0f,%.0f age=%.2f) vs %d (x=%.0f y=%.0f r=%.0f v=%.0f,%.0f age=%.2f)", o, i, a->x, a->y, a->radius, a->vx, a->vy, balls[i].age, j, b->x, b->y, b->radius, b->vx, b->vy, balls[j].age);
-            }
-        }
-        pg_log("t=%.0f live=%d vmax=%.0f vavg=%.0f maxpen=%.1f bodies=%d", pg_time(), n, vmax, n ? vsum / n : 0, pen, pg_world_count(W));
-    }
-#endif
 }
 
 /* ------------------------------------------------------------------------------------------------ rendering helpers */
@@ -566,14 +586,8 @@ static void bg_quad(PG_Tex tex, PG_V3 c, float w, float h, PG_Color tint, unsign
     pg3d_tri(tex, &v[0], &v[2], &v[3], flags | PG3D_TWOSIDED);
 }
 
-static PG_V3 lift_to_z(PG_V3 p0, float z)                /* the point at depth z on the eye ray through p0 (z=0) */
-{
-    float s = 1.0f - z / cam_now.eye.z;
-    return pg_v3_add(cam_now.eye, pg_v3_scale(pg_v3_sub(p0, cam_now.eye), s));
-}
-
 /* thin rope along a sagging curve, with pennants hanging from it */
-static void draw_bunting(float tm, float y0, float sag, float z, int n, int phase)
+static void draw_bunting(float y0, float sag, float z, int n, int phase)
 {
     PG_Tex white = pg3d_white();
     const float x0 = -WALL_X + 6.0f, x1 = WALL_X - 6.0f;
@@ -593,7 +607,7 @@ static void draw_bunting(float tm, float y0, float sag, float z, int n, int phas
     }
     for (int i = 0; i < n; i++) {
         float f = ((float)i + 0.5f) / (float)n, x = x0 + (x1 - x0) * f, y = y0 - sag * (1.0f - (2 * f - 1) * (2 * f - 1));
-        PG_M4 m = pg_m4_mul(pg_m4_translate(x, y, z + 1.0f), pg_m4_rot_z(0.12f * sinf(tm * 1.5f + (float)i * 0.9f + (float)phase)));
+        PG_M4 m = pg_m4_mul(pg_m4_translate(x, y, z + 1.0f), pg_m4_rot_z((0.12f + 0.40f * flag_kick) * sinf(flag_phase + (float)i * 0.9f + (float)phase)));
         PG_Color c = pg_hsv((float)((i * 5 + phase) % 6) * 60.0f + 8.0f, 0.62f, 1.0f);
         pg3d_mesh(m_pennant, T.flag, &m, c, PG3D_BG | PG3D_TWOSIDED);
     }
@@ -604,8 +618,8 @@ static void draw_backdrop(float tm)
     PG_M4 id = pg_m4_identity();
     pg3d_mesh(m_paper, T.wallpaper, &id, pg_rgb(255, 255, 255), PG3D_BG);
     pg3d_mesh(m_dado, T.quilt, &id, pg_rgb(196, 178, 255), PG3D_BG);
-    float breathe = 1.0f + 0.035f * sinf(tm * 1.1f), drift = 24.0f * sinf(tm * 0.11f);
-    bg_quad(T.sun, pg_v3(318, 150, BACK_Z + 4), 118 * breathe, 118 * breathe, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
+    float breathe = 1.0f + 0.035f * sinf(tm * 1.1f) + 0.22f * sun_pulse * sinf(sun_pulse * 12.0f), drift = 24.0f * sinf(tm * 0.11f);
+    bg_quad(T.sun, pg_v3(SUN_X, SUN_Y, BACK_Z + 4), 118 * breathe, 118 * breathe, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     bg_quad(T.cloud, pg_v3(-300 + drift, 150, BACK_Z + 4), 170, 85, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     bg_quad(T.cloud, pg_v3(-95 - drift * 0.6f, 205, BACK_Z + 4), 120, 60, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     PG_M4 ma = pg_m4_translate(0, FLOOR_Y + 14, BACK_Z + 30);
@@ -616,7 +630,7 @@ static void draw_backdrop(float tm)
     pg3d_mesh(m_side[0], T.quilt, &id, pg_rgb(128, 210, 226), PG3D_BG | PG3D_UNLIT);     /* left wall: in the shade */
     pg3d_mesh(m_side[1], T.quilt, &id, pg_rgb(168, 236, 246), PG3D_BG | PG3D_UNLIT);
     pg3d_mesh(m_ceil, T.wood, &id, pg_rgb(236, 222, 196), PG3D_BG | PG3D_UNLIT);
-    draw_bunting(tm, CEIL_Y - 26, 36, BACK_Z + 80, N_FLAGS, 0);
+    draw_bunting(CEIL_Y - 26, 36, BACK_Z + 80, N_FLAGS, 0);
     for (int i = 0; i < n_back; i++) {
         const BackBall *b = &back[i];
         PG_M4 m = ball_xform(b->x, b->y, b->z, b->r, b->a0 + b->spin * tm, cosf(b->tilt), sinf(b->tilt), b->a0 * 2.0f, 0, 0, 0);
@@ -684,35 +698,43 @@ static void draw_fx(float tm)
     for (int i = 0; i < PG_MAX_TOUCH; i++) {                /* glowing ring under every finger: its size is the shoving circle */
         const Finger *f = &fing[i];
         if (!f->held && f->linger <= 0) continue;
+        int crowd = 0;                                      /* fingers close together (a flat hand): only the first one glows */
+        for (int j = 0; j < i; j++) {
+            if (!fing[j].held && fing[j].linger <= 0) continue;
+            float dx = fing[j].wx - f->wx, dy = fing[j].wy - f->wy;
+            crowd += dx * dx + dy * dy < 90.0f * 90.0f;
+        }
         PG_V3 p = pg_v3(f->wx, f->wy, 0);
-        float pulse = 1.0f + 0.05f * sinf(tm * 8.0f + (float)i);
+        float pulse = 1.0f + 0.05f * sinf(tm * 8.0f + (float)i), fade = 1.0f / (1.0f + 0.8f * (float)crowd);
         PG_Color c = pg_hsv(190.0f + 40.0f * (float)i, 0.35f, 1.0f);
-        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.62f), PG3D_ADDITIVE);
-        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.18f), PG3D_ADDITIVE);
+        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.55f * fade), PG3D_ADDITIVE);
+        if (crowd) continue;
+        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.14f), PG3D_ADDITIVE);
         for (int k = 0; k < 3; k++) {
             float a = tm * 2.3f + (float)k * 2.094f + (float)i;
             float sz = 15.0f + 5.0f * sinf(tm * 7.0f + (float)(k * 2 + i));
-            pg3d_sprite(star, pg_v3(p.x + cosf(a) * FINGER_R * 0.98f, p.y + sinf(a) * FINGER_R * 0.98f, 0), sz, sz, a, pg_alpha(c, 0.9f), PG3D_ADDITIVE);
+            pg3d_sprite(star, pg_v3(p.x + cosf(a) * FINGER_R * 0.98f, p.y + sinf(a) * FINGER_R * 0.98f, 0), sz, sz, a, pg_alpha(c, 0.8f), PG3D_ADDITIVE);
         }
     }
     if (hint_a > 0.02f) {                                  /* the friendly hand: its fingertip is the ghost finger */
         float wig = 0.10f * sinf(tm * 3.1f);
-        PG_V3 tip = lift_to_z(pg_v3(hint_x, hint_y, 0), 110.0f);
+        PG_V3 tip = ray_at_z(pg_v3(hint_x, hint_y, 0), 110.0f);
         const float S = 86.0f, ox = 4.0f / 64.0f * S, oy = -27.0f / 64.0f * S;          /* sprite centre relative to the fingertip */
         float cw = cosf(wig), sw = sinf(wig);
         PG_V3 c = pg_v3(tip.x + ox * cw + oy * sw, tip.y - ox * sw + oy * cw, tip.z);
         pg3d_sprite(T.hand, c, S, S, wig, pg_alpha(pg_rgb(255, 255, 255), hint_a), 0);
         PG_V3 g = pg_v3(hint_x, hint_y, 0);
-        pg3d_sprite(T.ring, g, 70.0f, 70.0f, 0, pg_alpha(pg_hsv(48, 0.4f, 1), 0.8f * hint_a * (0.7f + 0.3f * sinf(tm * 5.0f))), PG3D_ADDITIVE);
+        pg3d_sprite(T.ring, g, 79.0f, 79.0f, 0, pg_alpha(pg_hsv(48, 0.4f, 1), 0.8f * hint_a * (0.7f + 0.3f * sinf(tm * 5.0f))), PG3D_ADDITIVE);
     }
 }
 
 static void render(SDL_Renderer *r)
 {
     float tm = pg_time();
+    double td = (double)pg_ticks() / 60.0;                  /* the camera sways in double precision so it stays smooth for days */
     PG_Camera cam = pg3d_camera_2d_fov(48);
-    cam.eye.x = 42.0f * sinf(tm * 0.31f);
-    cam.eye.y = 70.0f + 12.0f * sinf(tm * 0.23f + 1.0f);
+    cam.eye.x = 42.0f * (float)sin(td * 0.31);
+    cam.eye.y = 70.0f + 12.0f * (float)sin(td * 0.23 + 1.0);
     cam_now = cam;
     pg3d_begin(&cam);
     draw_backdrop(tm);
@@ -786,6 +808,7 @@ static int init(SDL_Renderer *r)
     pg3d_sky(pg_hex(0xBFE6FF), pg_hex(0xFFF0C8));
     pg3d_light(pg_v3(-0.34f, 0.60f, 0.72f), pg_rgb(130, 126, 114), pg_rgb(170, 176, 200), pg_rgb(114, 108, 106));
 
+    cam_now = pg3d_camera_2d_fov(48);
     W = pg_world_new(0, GRAVITY);
     if (!W) pg_fatal("ball-pit: out of memory (physics)");
     pg_world_set_quality(W, 3, 10);

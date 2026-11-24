@@ -198,9 +198,15 @@ static PG_Tex paint_fx(void)
     for (int cell = 0; cell < 8; cell++) {
         PG_Image *c = pg_img_new(32, 32, 0x00FFFFFFu);
         switch (cell) {
-        case FX_BEAN:
-            ell(c, 16, 16, 14.0f, 4.6f, -0.62f, WHITE, with_a(0xFFFFFF, 190));
+        case FX_BEAN: {                                           /* a curved window-reflection, fat in the middle, tapering out */
+            for (int i = 0; i <= 28; i++) {
+                float t = (float)i / 28.0f, u = 1.0f - t;
+                float x = u * u * 4.0f + 2 * u * t * 6.0f + t * t * 26.5f, y = u * u * 23.0f + 2 * u * t * 5.0f + t * t * 6.5f;
+                float r = 0.6f + 2.9f * powf(sinf(PG_PI * t), 0.75f);
+                pg_img_disc(c, x, y, r, with_a(0xFFFFFF, i < 14 ? 255 : 235));
+            }
             break;
+        }
         case FX_DOT:
             for (int y = 0; y < 32; y++)
                 for (int x = 0; x < 32; x++) {

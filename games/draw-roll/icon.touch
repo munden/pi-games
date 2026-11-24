@@ -1,0 +1,7 @@
+# Poses the scene for the launcher icon (make icon GAME=draw-roll): a few bright ramps, balls in the air, the cloud.
+drag   10 50 0 300 190 560 300
+drag   14 46 1 700 150 470 262
+wave   20 70 2 330 330 55 1.2
+drag   26 42 3 600 160 730 240
+tap    90 4 480 100
+tap   118 5 480 100

@@ -28,6 +28,22 @@ static PG_Tex up(PG_Image *im)
     return t;
 }
 
+/* a rectangle of a packed sheet (sw x sh texels) that lives in the shared atlas entry t */
+static PG_Tex sub_tex(PG_Tex t, int x, int y, int w, int h, int sw, int sh)
+{
+    float du = t.u1 - t.u0, dv = t.v1 - t.v0;
+    PG_Tex o = { t.u0 + du * ((float)x + 0.02f) / (float)sw, t.v0 + dv * ((float)y + 0.02f) / (float)sh,
+                 t.u0 + du * ((float)(x + w) - 0.02f) / (float)sw, t.v0 + dv * ((float)(y + h) - 0.02f) / (float)sh };
+    return o;
+}
+
+static void blit(PG_Image *dst, PG_Image *src, int x, int y)
+{
+    for (int j = 0; j < src->h; j++)
+        for (int i = 0; i < src->w; i++) dst->px[(y + j) * dst->w + x + i] = src->px[j * src->w + i];
+    pg_img_free(src);
+}
+
 void scene_textures(Game *g)
 {
     Textures *t = &g->tex;
@@ -38,13 +54,21 @@ void scene_textures(Game *g)
     t->ball[0] = up(paint_ball(0)); t->ball[1] = up(paint_ball(1));
     t->floor = up(paint_floor());
     t->wall = up(paint_wallpaper());
-    t->wainscot = up(paint_wainscot());
     t->rug = up(paint_rug());
     t->view = up(paint_view());
     t->chest = up(paint_chest_front());
-    t->button = up(paint_button());
-    t->glove = up(paint_glove());
-    t->fabric = up(paint_fabric());
+    t->poster = up(paint_poster());
+    /* small props share one 128x128 atlas entry: glove, button, wainscot boards, grain */
+    PG_Image *sheet = pg_img_new(128, 128, 0x00FFFFFFu);
+    blit(sheet, paint_glove(), 0, 0);
+    blit(sheet, paint_button(), 64, 0);
+    blit(sheet, paint_wainscot(), 0, 64);
+    blit(sheet, paint_fabric(), 64, 64);
+    PG_Tex ts = up(sheet);
+    t->glove = sub_tex(ts, 0, 0, 64, 64, 128, 128);
+    t->button = sub_tex(ts, 64, 0, 64, 64, 128, 128);
+    t->wainscot = sub_tex(ts, 0, 64, 64, 64, 128, 128);
+    t->fabric = sub_tex(ts, 64, 64, 16, 16, 128, 128);
     pg3d_sky(pg_hex(0xFFE9C8), pg_hex(0xFFD7A0));
     pg3d_light(pg_v3(0.55f, 0.65f, 0.60f), pg_hex(0xA29882), pg_hex(0x8E92AC), pg_hex(0x665C54));
     pg3d_fog(pg_hex(0xFFEBD2), 760.0f, 1500.0f);
@@ -95,34 +119,34 @@ static void draw_toys(const Game *g)
     /* teddy bear */
     const PG_Color brown = pg_rgb(196, 132, 74), tan = pg_rgb(238, 200, 146);
     float bx = 215;
-    put(m->sph, f, bx - 21, ys + 16, z + 22, 10, 10, 10, 0, brown, 0);          /* legs */
-    put(m->sph, f, bx + 21, ys + 16, z + 22, 10, 10, 10, 0, brown, 0);
+    put(m->sph_lo, f, bx - 21, ys + 16, z + 22, 10, 10, 10, 0, brown, 0);          /* legs */
+    put(m->sph_lo, f, bx + 21, ys + 16, z + 22, 10, 10, 10, 0, brown, 0);
     put(m->sph, f, bx, ys + 27, z, 25, 27, 22, 0, brown, 0);                    /* body */
     put(m->sph, f, bx, ys + 30, z + 14, 15, 17, 12, 0, tan, 0);                 /* tummy */
-    put(m->sph, f, bx - 27, ys + 32, z + 4, 8, 11, 8, 0.5f, brown, 0);          /* arms */
-    put(m->sph, f, bx + 27, ys + 32, z + 4, 8, 11, 8, -0.5f, brown, 0);
-    put(m->sph, f, bx - 14, ys + 65, z - 2, 7, 7, 6, 0, brown, 0);              /* ears */
-    put(m->sph, f, bx + 14, ys + 65, z - 2, 7, 7, 6, 0, brown, 0);
+    put(m->sph_lo, f, bx - 27, ys + 32, z + 4, 8, 11, 8, 0.5f, brown, 0);          /* arms */
+    put(m->sph_lo, f, bx + 27, ys + 32, z + 4, 8, 11, 8, -0.5f, brown, 0);
+    put(m->sph_lo, f, bx - 14, ys + 65, z - 2, 7, 7, 6, 0, brown, 0);              /* ears */
+    put(m->sph_lo, f, bx + 14, ys + 65, z - 2, 7, 7, 6, 0, brown, 0);
     put(m->sph, f, bx, ys + 56, z + 2, 19, 17, 17, 0, brown, 0);                /* head */
-    put(m->sph, f, bx, ys + 51, z + 15, 9, 7, 6, 0, tan, 0);                    /* muzzle */
-    put(m->sph, f, bx, ys + 54, z + 20, 3, 2.4f, 2.4f, 0, pg_rgb(60, 40, 40), 0);
-    put(m->sph, f, bx - 7, ys + 60, z + 15, 2.4f, 2.4f, 2, 0, pg_rgb(40, 34, 40), 0);
-    put(m->sph, f, bx + 7, ys + 60, z + 15, 2.4f, 2.4f, 2, 0, pg_rgb(40, 34, 40), 0);
+    put(m->sph_lo, f, bx, ys + 51, z + 15, 9, 7, 6, 0, tan, 0);                    /* muzzle */
+    put(m->sph_lo, f, bx, ys + 54, z + 20, 3, 2.4f, 2.4f, 0, pg_rgb(60, 40, 40), 0);
+    put(m->sph_lo, f, bx - 7, ys + 60, z + 15, 2.4f, 2.4f, 2, 0, pg_rgb(40, 34, 40), 0);
+    put(m->sph_lo, f, bx + 7, ys + 60, z + 15, 2.4f, 2.4f, 2, 0, pg_rgb(40, 34, 40), 0);
     put(m->torus, f, bx, ys + 41, z + 1, 14, 6, 14, 0, pg_rgb(232, 67, 58), 0);   /* a red bow */
     /* rubber duck */
     float dx = 282;
     put(m->sph, f, dx, ys + 14, z + 4, 20, 14, 15, 0, pg_rgb(255, 214, 59), 0);
-    put(m->sph, f, dx - 17, ys + 22, z + 4, 8, 9, 6, 0.4f, pg_rgb(255, 214, 59), 0);   /* tail */
-    put(m->sph, f, dx + 10, ys + 33, z + 5, 11, 11, 11, 0, pg_rgb(255, 214, 59), 0);
+    put(m->sph_lo, f, dx - 17, ys + 22, z + 4, 8, 9, 6, 0.4f, pg_rgb(255, 214, 59), 0);   /* tail */
+    put(m->sph_lo, f, dx + 10, ys + 33, z + 5, 11, 11, 11, 0, pg_rgb(255, 214, 59), 0);
     put(m->cone, f, dx + 22, ys + 31, z + 5, 4, 7, 5, -1.45f, pg_rgb(255, 138, 42), 0);
-    put(m->sph, f, dx + 13, ys + 37, z + 14, 2.2f, 2.2f, 2, 0, pg_rgb(40, 34, 40), 0);
+    put(m->sph_lo, f, dx + 13, ys + 37, z + 14, 2.2f, 2.2f, 2, 0, pg_rgb(40, 34, 40), 0);
     /* ring stacker */
     float rx = 338;
     put(m->cyl, f, rx, ys + 4, z, 17, 4, 17, 0, pg_rgb(62, 134, 232), 0);
     put(m->cyl, f, rx, ys + 24, z, 2.6f, 20, 2.6f, 0, pg_rgb(255, 230, 190), 0);
     static const uint32_t ring[4] = { 0xE8433A, 0xFF9A2E, 0xFFD93B, 0x4CB84A };
     for (int i = 0; i < 4; i++) put(m->torus, f, rx, ys + 11 + (float)i * 8.5f, z, 17.0f - (float)i * 2.6f, 11, 17.0f - (float)i * 2.6f, 0, pg_hex(ring[i]), 0);
-    put(m->sph, f, rx, ys + 46, z, 4, 4, 4, 0, pg_rgb(255, 230, 190), 0);
+    put(m->sph_lo, f, rx, ys + 46, z, 4, 4, 4, 0, pg_rgb(255, 230, 190), 0);
 }
 
 static void draw_bunting(const Game *g, float t)
@@ -167,8 +191,8 @@ static void draw_window(const Game *g)
     put(m->bar_v, f, wx, wy, BACK_Z + 6, 1, 1, 1, 0, paint, 0);
     put(m->sill, f, wx, wy - 91, BACK_Z + 20, 1, 1, 1, 0, paint, 0);
     put(m->rod, f, wx, wy + 117, BACK_Z + 16, 1, 1, 1, 0, pg_rgb(214, 160, 90), 0);
-    put(m->sph, f, wx - 126, wy + 117, BACK_Z + 16, 7, 7, 7, 0, pg_rgb(214, 160, 90), 0);
-    put(m->sph, f, wx + 126, wy + 117, BACK_Z + 16, 7, 7, 7, 0, pg_rgb(214, 160, 90), 0);
+    put(m->sph_lo, f, wx - 126, wy + 117, BACK_Z + 16, 7, 7, 7, 0, pg_rgb(214, 160, 90), 0);
+    put(m->sph_lo, f, wx + 126, wy + 117, BACK_Z + 16, 7, 7, 7, 0, pg_rgb(214, 160, 90), 0);
     put(m->curtain, f, wx - 132, wy + 13, BACK_Z + 16, 1, 1, 1, 0, coral, PG3D_TWOSIDED);
     put(m->curtain, f, wx + 132, wy + 13, BACK_Z + 16, 1, 1, 1, 0, coral, PG3D_TWOSIDED);
     put(m->torus, f, wx - 132, wy - 20, BACK_Z + 18, 22, 9, 22, 0, pg_rgb(255, 214, 90), PG3D_TWOSIDED);
@@ -205,6 +229,8 @@ static void draw_room(const Game *g, float t)
     put(m->side_rail, x->fabric, WALL_X - 7, FLOOR_Y + 112, -75, 1, 1, 1, 0, cream, PG3D_BG);
 
     put(m->quad, x->view, -175, 120, BACK_Z + 1, 95, 85, 1, 0, WHITE, PG3D_BG | PG3D_UNLIT | PG3D_NOFOG);
+    put(m->poster_frame, x->fabric, -388, 118, BACK_Z + 5, 1.2f, 1.2f, 1, 0.03f, pg_rgb(255, 214, 120), 0);     /* a framed painting */
+    put(m->poster, x->poster, -388, 118, BACK_Z + 10, 1.2f, 1.2f, 1, 0.03f, WHITE, 0);
     draw_window(g);
     /* shelf with toys */
     put(m->shelf, x->fabric, 228, 100, BACK_Z + 34, 1, 1, 1, 0, pg_rgb(214, 150, 84), 0);
@@ -231,6 +257,7 @@ static void draw_shadows(const Game *g)
         float h = fmaxf(0, p->y - ey - surf);
         if (h > 300.0f) continue;
         float a = 0.52f / (1.0f + h * 0.028f);
+        if (a < 0.06f) continue;
         float rad = fmaxf(ex * 0.85f, 30.0f) * (1.0f + h / 600.0f);
         int nb = ex > 70.0f ? 3 : ex > 44.0f ? 2 : 1;
         for (int k = 0; k < nb; k++) {
@@ -253,6 +280,25 @@ static void draw_chest(const Game *g, float t)
     float pr = g->press, s = (1.0f + 0.03f * sinf(t * 3.4f)) * (1.0f - 0.10f * pr), zo = -9.0f * pr;
     put(m->btn_rim, x->fabric, CHEST_X, BTN_Y, BTN_Z + zo, s, s, s, 0, pg_rgb(255, 214, 92), 0);
     put(m->btn_face, x->button, CHEST_X, BTN_Y, BTN_Z + 3.0f + zo, s, s, s, 0, WHITE, PG3D_UNLIT | PG3D_NOFOG);
+}
+
+
+/* a toy car left lying in the foreground (in front of the play plane): depth and scale for the eye.
+ * Only the near wheels are drawn, and they sit beside the body, never inside it (the painter's sort needs that). */
+static void draw_car(const Game *g)
+{
+    const Meshes *m = &g->mesh;
+    const PG_Tex f = g->tex.fabric;
+    const float x = -292.0f, z = 188.0f, y0 = FLOOR_Y;
+    put(m->car_body, f, x, y0 + 19, z, 1, 1, 1, 0, pg_rgb(232, 67, 58), 0);
+    put(m->car_cab, f, x - 6, y0 + 40, z, 1, 1, 1, 0, pg_rgb(255, 210, 70), 0);
+    put(m->sph_lo, f, x + 39, y0 + 21, z + 13, 5, 5, 3, 0, pg_rgb(255, 248, 200), 0);          /* headlamps */
+    put(m->sph_lo, f, x + 39, y0 + 21, z - 13, 5, 5, 3, 0, pg_rgb(255, 248, 200), 0);
+    for (int i = 0; i < 2; i++) {
+        float wx = x + (i ? 24.0f : -24.0f), wz = z + 23.0f + 6.5f;
+        put(m->wheel, f, wx, y0 + 10, wz, 10, 10, 6, 0, pg_rgb(70, 74, 96), 0);
+        put(m->btn_face, f, wx, y0 + 10, wz + 6.4f, 0.1f, 0.1f, 1, 0, pg_rgb(210, 214, 230), 0);
+    }
 }
 
 /* ---------------------------------------------------------------- blocks */
@@ -338,14 +384,14 @@ static void draw_fx(const Game *g, float t)
         PG_V3 w;
         if (!pg3d_plane_z(tc[i].x, tc[i].y, 80.0f, &w)) continue;
         PG_Color c = pg_hsv(30.0f + 47.0f * (float)i, 0.35f, 1.0f);
-        pg3d_sprite(glow, w, 96, 96, 0, pg_alpha(c, 0.7f), PG3D_ADDITIVE);
-        pg3d_sprite(glow, w, 40, 40, 0, pg_alpha(WHITE, 0.8f), PG3D_ADDITIVE);
+        pg3d_sprite(glow, w, 90, 90, 0, pg_alpha(c, 0.5f), PG3D_ADDITIVE);
+        pg3d_sprite(glow, w, 36, 36, 0, pg_alpha(WHITE, 0.55f), PG3D_ADDITIVE);
     }
     for (int i = 0; i < MAX_BLOCKS; i++) {
         const Block *b = &g->blocks[i];
         if (!b->body || b->lift < 0.05f) continue;
         float r = b->kind == KIND_BALL ? b->body->radius * 2.4f : hypotf(b->body->hx, b->body->hy) * 2.5f;
-        pg3d_sprite(glow, pg_v3(b->body->x, b->body->y, 26), r, r, 0, pg_alpha(pg_rgb(255, 232, 170), 0.35f * b->lift), PG3D_ADDITIVE);
+        pg3d_sprite(glow, pg_v3(b->body->x, b->body->y, 26), r * 1.15f, r * 1.15f, 0, pg_alpha(pg_rgb(255, 232, 170), 0.2f * b->lift), PG3D_ADDITIVE);
     }
     /* the big button breathes so it is easy to find; the sun twinkles */
     float pulse = 0.5f + 0.5f * sinf(t * 2.2f);
@@ -381,6 +427,7 @@ void scene_render(Game *g, SDL_Renderer *r)
     draw_room(g, t);
     draw_shadows(g);
     draw_chest(g, t);
+    draw_car(g);
     draw_blocks(g);
     draw_ghosts(g);
     draw_fx(g, t);

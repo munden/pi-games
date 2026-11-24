@@ -30,7 +30,7 @@ static struct {
     float press, press_v, wipe_t;
     bool  pressed;
     float look_x, look_y, look_hold, pupil_x, pupil_y;
-    int   combo; uint64_t last_eat;
+    int   combo, eaten; uint64_t last_eat;
 } T;
 
 /* the cloud drifts slowly left and right so the balls land in different places */
@@ -116,27 +116,27 @@ static PG_Tex paint_bucket(void)
     return tex_finish(im, true);
 }
 
-static PG_Tex paint_rim(void)
+static PG_Image *paint_rim(void)
 {
     PG_Image *im = pg_img_new(32, 16, 0xFFFFFFFFu);
     pg_img_stripes(im, 4, 0, PG_RGB24(0xFFFFFF), PG_RGB24(0x5EB6FF));
-    return tex_finish(im, true);
+    return im;
 }
 
-static PG_Tex paint_inside(void)
+static PG_Image *paint_inside(void)
 {
     PG_Image *im = pg_img_new(32, 32, PG_RGB24(0x1B3358));
     pg_img_gradient_radial(im, 16, 16, 16, PG_RGB24(0x0F1D3C), PG_RGB24(0x2B6E86));
     pg_img_noise(im, 3, 14);
-    return tex_finish(im, true);
+    return im;
 }
 
-static PG_Tex paint_pedestal(void)
+static PG_Image *paint_pedestal(void)
 {
     PG_Image *im = pg_img_new(32, 32, PG_RGB24(0x5AA6F5));
     pg_img_gradient_radial(im, 16, 16, 16, PG_RGB24(0xB8E2FF), PG_RGB24(0x4C94EE));
     pg_img_ring(im, 16, 16, 11.0f, 1.6f, PG_ARGB(200, 255, 255, 255));
-    return tex_finish(im, true);
+    return im;
 }
 
 static PG_Tex paint_sponge(void)
@@ -180,8 +180,15 @@ void toys_init(void)
     m_pedrim  = pg_mesh_torus(SP_R - 1.0f, 8.0f, 20, 6);
     m_sponge  = pg_mesh_bevel_box(44.0f, 28.0f, 22.0f, 10.0f);
     m_quad    = pg_mesh_quad(1.0f, 1.0f);
-    t_cloud = paint_cloud(); t_bucket = paint_bucket(); t_rim = paint_rim();
-    t_inside = paint_inside(); t_ped = paint_pedestal(); t_sponge = paint_sponge();
+    t_cloud = paint_cloud(); t_bucket = paint_bucket(); t_sponge = paint_sponge();
+    PG_Image *sheet = pg_img_new(96, 32, 0x00FFFFFFu), *part;                        /* rim, bucket inside and button face share a sheet */
+    part = paint_rim();      img_blit(sheet, part, 0, 0);  pg_img_free(part);
+    part = paint_inside();   img_blit(sheet, part, 32, 0); pg_img_free(part);
+    part = paint_pedestal(); img_blit(sheet, part, 64, 0); pg_img_free(part);
+    PG_Tex toy = tex_finish(sheet, true);
+    t_rim = tex_sub(toy, 96, 32, 0, 0, 32, 16);
+    t_inside = tex_sub(toy, 96, 32, 32, 0, 32, 32);
+    t_ped = tex_sub(toy, 96, 32, 64, 0, 32, 32);
     paint_face_sheet();
     memset(&T, 0, sizeof T);
     T.next_blink = 2.0f;
@@ -230,6 +237,11 @@ void toys_bucket_eat(float x, float y)
     fx_burst(px, RIM_Y + 14.0f, 56.0f, 9, 230.0f, 48.0f + (float)(T.combo % 7) * 42.0f, 50.0f, 22.0f);
     fx_confetti(px, RIM_Y + 10.0f, 52.0f, 6, 260.0f);
     fx_glow(px, RIM_Y + 6.0f, 50.0f, 240.0f, pg_rgb(255, 214, 130), 0.55f);
+    if (++T.eaten % 5 == 0) {                                        /* every fifth ball: a little party */
+        T.gulp_v = 11.0f;
+        fx_confetti(0.0f, RIM_Y + 20.0f, 56.0f, 14, 340.0f);
+        fx_burst(0.0f, RIM_Y + 30.0f, 60.0f, 8, 260.0f, 320.0f, 60.0f, 24.0f);
+    }
 }
 
 void toys_sponge_press(bool down)

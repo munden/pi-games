@@ -35,11 +35,6 @@ static int       pattern_ctr;
 static int       cap_now = MAX_BALLS;
 
 /* ---------------------------------------------------------------- patterns */
-static void blit(PG_Image *dst, const PG_Image *src, int ox, int oy)
-{
-    for (int j = 0; j < src->h; j++) for (int i = 0; i < src->w; i++) dst->px[(oy + j) * dst->w + ox + i] = src->px[j * src->w + i];
-}
-
 static void pat_beach(PG_Image *im)
 {
     static const uint32_t col[6] = { 0xFF4F6A, 0xFFFFFF, 0xFFC53D, 0xFFFFFF, 0x3AA8FF, 0xFFFFFF };
@@ -118,7 +113,7 @@ void balls_init(PG_World *w)
         PG_Image *im = pg_img_new(64, 32, 0xFFFFFFFFu);
         paint[k](im);
         pg_img_noise(im, 4, 100u + (uint32_t)k);
-        blit(sheet, im, (k & 1) * 64, (k >> 1) * 32);
+        img_blit(sheet, im, (k & 1) * 64, (k >> 1) * 32);
         pg_img_free(im);
     }
     PG_Tex all = tex_finish(sheet, true);
@@ -133,13 +128,6 @@ void balls_shutdown(void)
 {
     pg_mesh_free(m_ball); pg_mesh_free(m_quad);
     m_ball = m_quad = NULL;
-}
-
-int balls_count(void)
-{
-    int n = 0;
-    for (int i = 0; i < SLOTS; i++) n += B[i].state == B_ALIVE;
-    return n;
 }
 
 bool balls_nearest(float x, float y, float *bx, float *by)
@@ -162,9 +150,6 @@ static void ball_end_body(Ball *b)
 static void ball_poof(Ball *b)
 {
     if (b->state != B_ALIVE) return;
-#ifdef DR_STATS
-    pg_log("poof %u at tick %llu x=%.0f y=%.0f age=%.1f still=%.1f", b->serial, (unsigned long long)pg_ticks(), b->x, b->y, b->age, b->still);
-#endif
     ball_end_body(b);
     b->state = B_POOF; b->anim = 0.0f;
     fx_burst(b->x, b->y, 24.0f, 5, 130.0f, 50.0f + (float)b->pattern * 40.0f, 40.0f, 15.0f);
@@ -172,9 +157,6 @@ static void ball_poof(Ball *b)
 
 static void ball_swallow(Ball *b)
 {
-#ifdef DR_STATS
-    pg_log("eaten %u at tick %llu x=%.0f", b->serial, (unsigned long long)pg_ticks(), b->x);
-#endif
     ball_end_body(b);
     b->state = B_SWALLOW; b->anim = 0.0f;
     toys_bucket_eat(b->x, b->y);
@@ -239,9 +221,6 @@ void balls_update(float degrade)
             b->age += PG_DT;
             float sp = p->vx * p->vx + p->vy * p->vy;
             b->still = sp < 18.0f * 18.0f ? b->still + PG_DT : 0.0f;
-#ifdef DR_STATS
-            if ((pg_ticks() & 1) == 0) pg_log("ballpos %u %llu %.1f %.1f %.0f", b->serial, (unsigned long long)pg_ticks(), b->x, b->y, sqrtf(sp));
-#endif
             if (b->y < RIM_Y - 14.0f && fabsf(b->x) < MOUTH_X + 6.0f) ball_swallow(b);
             else if (b->y < -340.0f || b->y > 520.0f || fabsf(b->x) > 560.0f || b->still > 6.0f || b->age > 50.0f) ball_poof(b);
         } else if (b->state == B_SWALLOW) {
@@ -273,7 +252,7 @@ void balls_render_shadows(void)
         if (b->state == B_FREE || b->state == B_SWALLOW) continue;
         float s = ball_scale(b) * b->r * 1.55f;
         PG_M4 m = pg_m4_trs2(b->x + 17.0f, b->y - 22.0f, BACK_Z + 1.0f, 0, s, s, 1.0f);
-        pg3d_mesh(m_quad, disc, &m, pg_rgba(255, 255, 255, 170), fl);
+        pg3d_mesh(m_quad, disc, &m, pg_rgba(255, 255, 255, 130), fl);
     }
 }
 

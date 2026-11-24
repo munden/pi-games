@@ -60,6 +60,13 @@ static const Anchor *nearest(const Anchor *list, int n, PG_V3 p, float *cos_d)
     return best;
 }
 
+static float near_cos(const Anchor *list, int n, PG_V3 p)       /* cosine of the angle to the closest anchor */
+{
+    float cd;
+    nearest(list, n, p, &cd);
+    return cd;
+}
+
 /* planar coordinates (radians of arc) of p around the anchor, in the anchor's own frame */
 static void local_xy(const Anchor *an, PG_V3 p, float cos_d, float *x, float *y)
 {
@@ -130,15 +137,10 @@ static uint32_t ball_pattern(int kind, PG_V3 p, float u, float v)
         return (f < 0.06f || f > 0.94f) ? pg_argb_scale(rainbow7[band], 0.88f) : rainbow7[band];
     }
     case BT_DOTS_RED:
-        an = nearest(ico, 12, p, &cd);
-        (void)an;
-        return cd > cosf(0.30f) ? C(255, 255, 255) : C(238, 56, 64);
+        return near_cos(ico, 12, p) > cosf(0.30f) ? C(255, 255, 255) : C(238, 56, 64);
     case BT_DOTS_BLUE:
-        an = nearest(ico, 12, p, &cd);
-        (void)an;
-        if (cd > cosf(0.27f)) return C(255, 214, 54);
-        an = nearest(oct, 6, p, &cd);
-        return cd > cosf(0.15f) ? C(255, 255, 255) : C(44, 112, 236);
+        if (near_cos(ico, 12, p) > cosf(0.27f)) return C(255, 214, 54);
+        return near_cos(oct, 6, p) > cosf(0.15f) ? C(255, 255, 255) : C(44, 112, 236);
     case BT_STARS_BLUE:
         an = nearest(oct, 6, p, &cd);
         local_xy(an, p, cd, &x, &y);

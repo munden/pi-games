@@ -24,5 +24,6 @@ PG_Image *paint_chest_front(void);    /* 96x80 */
 PG_Image *paint_button(void);         /* 64x64 round pictogram: a little block pyramid and a star */
 PG_Image *paint_glove(void);          /* 64x64 pointing glove, finger up */
 PG_Image *paint_fabric(void);         /* 16x16 neutral plush/paint grain to be tinted */
+PG_Image *paint_poster(void);         /* 64x80 painting: a hot-air balloon over hills */
 
 #endif

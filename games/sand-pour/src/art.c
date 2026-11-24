@@ -150,17 +150,14 @@ static PG_Tex paint_sun(int mode)
     return finish(im);
 }
 
-static PG_Tex paint_cloud(int variant)
+static PG_Tex paint_cloud(void)
 {
     PG_Image *im = pg_img_new(64, 32, 0);
-    static const float d[2][6][3] = {
-        { { 16, 20, 9 }, { 29, 14, 12 }, { 44, 18, 11 }, { 53, 23, 7 }, { 24, 24, 8 }, { 40, 24, 9 } },
-        { { 14, 21, 8 }, { 25, 16, 11 }, { 36, 12, 10 }, { 47, 19, 11 }, { 33, 23, 9 }, { 53, 24, 7 } } };
-    for (int i = 0; i < 6; i++) pg_img_disc(im, d[variant][i][0], d[variant][i][1] + 2.2f, d[variant][i][2], ARGB(255, 0xCFE3FA));
-    for (int i = 0; i < 6; i++) pg_img_disc(im, d[variant][i][0], d[variant][i][1], d[variant][i][2], ARGB(255, 0xFFFFFF));
+    static const float d[6][3] = { { 16, 20, 9 }, { 29, 14, 12 }, { 44, 18, 11 }, { 53, 23, 7 }, { 24, 24, 8 }, { 40, 24, 9 } };
+    for (int i = 0; i < 6; i++) pg_img_disc(im, d[i][0], d[i][1] + 2.2f, d[i][2], ARGB(255, 0xCFE3FA));
+    for (int i = 0; i < 6; i++) pg_img_disc(im, d[i][0], d[i][1], d[i][2], ARGB(255, 0xFFFFFF));
     return finish(im);
 }
-
 static PG_Tex paint_trunk(void)
 {
     PG_Image *im = pg_img_new(32, 64, RGB(0xA66E3E));
@@ -182,15 +179,6 @@ static PG_Tex paint_leaf(void)                       /* a palm frond: spine plus
     }
     pg_img_line(im, 2, 32, 62, 32, 3.4f, ARGB(255, 0x2A7F3B));
     pg_img_line(im, 2, 31, 60, 31, 1.2f, ARGB(255, 0xA7F08E));
-    return finish(im);
-}
-
-static PG_Tex paint_coconut(void)
-{
-    PG_Image *im = pg_img_new(16, 16, RGB(0x7A4B28));
-    pg_img_disc(im, 5, 5, 3.0f, ARGB(110, 0xC79A66));
-    pg_img_disc(im, 10, 11, 1.4f, ARGB(220, 0x3E2410)); pg_img_disc(im, 12, 9, 1.2f, ARGB(220, 0x3E2410)); pg_img_disc(im, 9, 13, 1.2f, ARGB(220, 0x3E2410));
-    pg_img_noise(im, 8, 61);
     return finish(im);
 }
 
@@ -240,41 +228,41 @@ static PG_Tex paint_crate(void)
     return finish(im);
 }
 
-static PG_Tex paint_hand(void)                       /* a friendly pointing mitten, finger tip at the bottom */
+static PG_Tex paint_hand(void)                       /* a friendly pointing mitten with a blue sleeve, finger tip at the bottom */
 {
     PG_Image *im = pg_img_new(64, 64, 0);
-    const uint32_t edge = 0xE59A6A, skin = 0xFFD2A4;
+    const uint32_t edge = 0xD4825A, skin = 0xFFD3A6;
     for (int pass = 0; pass < 2; pass++) {
         uint32_t c = pass ? ARGB(255, skin) : ARGB(255, edge);
-        float k = pass ? 0.0f : 2.0f;
-        pg_img_line(im, 32, 55, 32, 34, 12.0f + k, c);
-        pg_img_disc(im, 32, 27, 17.0f + k, c);
-        pg_img_line(im, 17, 27, 9, 40, 9.0f + k, c);
-        pg_img_disc(im, 45, 22, 7.5f + k, c); pg_img_disc(im, 46, 32, 6.8f + k, c); pg_img_disc(im, 43, 41, 6.0f + k, c);
+        float k = pass ? 0.0f : 3.2f;
+        pg_img_line(im, 32, 56, 32, 36, 12.5f + k, c);
+        pg_img_disc(im, 32, 29, 17.0f + k, c);
+        pg_img_line(im, 17, 29, 9, 42, 9.5f + k, c);
+        pg_img_disc(im, 45, 24, 7.5f + k, c); pg_img_disc(im, 46, 34, 7.0f + k, c); pg_img_disc(im, 43, 43, 6.2f + k, c);
     }
-    pg_img_rect(im, 13, 0, 38, 5, ARGB(255, 0xFFFFFF));
-    pg_img_rect(im, 15, 0, 34, 2, ARGB(255, 0x4A8DF0));
-    pg_img_disc(im, 28, 24, 6.0f, ARGB(80, 0xFFFFFF));
-    pg_img_line(im, 28, 52, 28, 38, 3.0f, ARGB(60, 0xFFFFFF));
+    pg_img_line(im, 41, 29, 50, 29, 1.8f, ARGB(170, edge)); pg_img_line(im, 41, 38, 50, 38, 1.8f, ARGB(170, edge));
+    pg_img_disc(im, 28, 25, 6.5f, ARGB(110, 0xFFF0DC));
+    pg_img_line(im, 28, 52, 28, 40, 3.0f, ARGB(90, 0xFFF0DC));
+    pg_img_rect(im, 11, 10, 42, 5, ARGB(255, 0xFFFFFF));
+    pg_img_rect(im, 13, 0, 38, 10, ARGB(255, 0x4A8DF0));
+    pg_img_rect(im, 13, 0, 5, 10, ARGB(110, 0xFFFFFF));
     return finish(im);
 }
-
-static PG_Tex paint_flower(uint32_t petal, uint32_t heart)
+static PG_Tex paint_flower(void)                     /* white petals with a golden heart; tinted pink / white / orange when drawn */
 {
     PG_Image *im = pg_img_new(32, 32, 0);
     for (int i = 0; i < 8; i++) {
         float a = (float)i * PG_TAU / 8.0f;
-        pg_img_disc(im, 16.0f + cosf(a) * 9.6f, 16.0f + sinf(a) * 9.6f, 5.6f, ARGB(255, 0xE8E0E0));
+        pg_img_disc(im, 16.0f + cosf(a) * 9.6f, 16.0f + sinf(a) * 9.6f, 5.6f, ARGB(255, 0xE0D8D8));
     }
     for (int i = 0; i < 8; i++) {
         float a = (float)i * PG_TAU / 8.0f;
-        pg_img_disc(im, 16.0f + cosf(a) * 9.6f, 15.4f + sinf(a) * 9.6f, 5.2f, ARGB(255, petal));
+        pg_img_disc(im, 16.0f + cosf(a) * 9.6f, 15.4f + sinf(a) * 9.6f, 5.2f, ARGB(255, 0xFFFFFF));
     }
-    pg_img_disc(im, 16, 16, 6.2f, ARGB(255, 0xC77D14));
-    pg_img_disc(im, 15.6f, 15.4f, 5.2f, ARGB(255, heart));
+    pg_img_disc(im, 16, 16, 6.2f, ARGB(255, 0xD79A2A));
+    pg_img_disc(im, 15.6f, 15.4f, 5.2f, ARGB(255, 0xFFE27A));
     return finish(im);
 }
-
 static PG_Tex paint_stem(void)
 {
     PG_Image *im = pg_img_new(8, 16, RGB(0x3FA047));
@@ -303,14 +291,6 @@ static PG_Tex paint_bucket(void)
     return finish(im);
 }
 
-static PG_Tex paint_sandcap(void)
-{
-    PG_Image *im = pg_img_new(32, 32, RGB(0xF1D58E));
-    for (int i = 0; i < 200; i++) pg_img_rect(im, pg_rand_int(0, 31), pg_rand_int(0, 31), 1, 1, (i & 1) ? ARGB(150, 0xC49A52) : ARGB(170, 0xFFF1C2));
-    pg_img_noise(im, 6, 101);
-    return finish(im);
-}
-
 static PG_Tex paint_starfish(void)
 {
     PG_Image *im = pg_img_new(32, 32, 0);
@@ -320,13 +300,6 @@ static PG_Tex paint_starfish(void)
         float a = (float)i * PG_TAU / 5.0f - PG_PI * 0.5f;
         for (int k = 1; k < 4; k++) pg_img_disc(im, 16.0f + cosf(a) * (float)k * 3.4f, 16.0f + sinf(a) * (float)k * 3.4f, 0.9f, ARGB(220, 0xFFE0A8));
     }
-    return finish(im);
-}
-
-static PG_Tex paint_slot(void)
-{
-    PG_Image *im = pg_img_new(16, 16, RGB(0x3A2540));
-    pg_img_gradient_v(im, 0, 0, 16, 16, RGB(0x6A4668), RGB(0x24142C));
     return finish(im);
 }
 
@@ -402,6 +375,20 @@ static PG_Mesh *mesh_quad3(PG_V3 a, PG_V3 b, PG_V3 c, PG_V3 d, PG_V3 n)
     return bld_done(&bl);
 }
 
+/* a glossy rainbow ribbon (vertex colours, white texture) for the front of the base */
+static PG_Mesh *mesh_rainbow(float half_w, float half_h, int segs)
+{
+    Bld b = bld_new((segs + 1) * 2, segs * 6);
+    for (int i = 0; i <= segs; i++) {
+        float t = (float)i / (float)segs, x = -half_w + 2.0f * half_w * t;
+        PG_Color top = pg_hsv(t * 300.0f, 0.55f, 1.0f), bot = pg_hsv(t * 300.0f, 0.8f, 0.82f);
+        int a = bld_v(&b, pg_v3(x, half_h, 0), pg_v3(0, 0, 1), t, 0), c = bld_v(&b, pg_v3(x, -half_h, 0), pg_v3(0, 0, 1), t, 1);
+        b.v[a].c = top; b.v[c].c = bot;
+    }
+    for (int i = 0; i < segs; i++) { int a = i * 2; bld_t(&b, a, a + 1, a + 3); bld_t(&b, a, a + 3, a + 2); }
+    return bld_done(&b);
+}
+
 static PG_Mesh *mesh_frustum(float rb, float rt, float hh, int segs)
 {
     Bld b = bld_new((segs + 1) * 2, segs * 6);
@@ -453,22 +440,17 @@ void art_init(void)
     A.sea = paint_sea();
     A.rays = paint_rays();
     for (int i = 0; i < 3; i++) A.sun[i] = paint_sun(i);
-    A.cloud[0] = paint_cloud(0); A.cloud[1] = paint_cloud(1);
-    A.trunk = paint_trunk(); A.leaf = paint_leaf(); A.coconut = paint_coconut();
+    A.cloud = paint_cloud();
+    A.trunk = paint_trunk(); A.leaf = paint_leaf();
     A.btn = paint_button();
     A.btnbase = paint_stripes_tex(32, 8, 4, 0xFFD34A, 0xE59A18);
     A.crate = paint_crate();
     A.hand = paint_hand();
-    A.flower[0] = paint_flower(0xFF7BAC, 0xFFE14A);
-    A.flower[1] = paint_flower(0xFFFFFF, 0xFFC93A);
-    A.flower[2] = paint_flower(0xFFA33A, 0xFFE9A0);
+    A.flower = paint_flower();
     A.stem = paint_stem();
     A.ball = paint_ball();
     A.bucket = paint_bucket();
-    A.sandcap = paint_sandcap();
     A.starfish = paint_starfish();
-    A.slot = paint_slot();
-    A.spade = paint_stripes_tex(16, 16, 4, 0xF2544E, 0xFF8A7A);
     A.sheen = paint_sheen();
     A.puff = paint_puff();
 
@@ -494,7 +476,7 @@ void art_init(void)
     A.sea_quad = pg_mesh_quad(1600, 200);
     A.trunk_seg = pg_mesh_cylinder(10.0f, 20.0f, 10);
     A.leaf_m = mesh_leaf(112.0f, 24.0f, 34.0f);
-    A.coconut_m = pg_mesh_sphere(8.0f, 8, 5);
+    A.coconut_m = pg_mesh_sphere(8.0f, 12, 8);
     A.crate_m = pg_mesh_bevel_box(62.0f, 58.0f, 42.0f, 11.0f);
     A.btn_cap = pg_mesh_cylinder(47.0f, 9.0f, 24);
     A.btn_ring = pg_mesh_cylinder(55.0f, 5.0f, 24);
@@ -506,13 +488,14 @@ void art_init(void)
     A.spade_h = pg_mesh_bevel_box(3.0f, 30.0f, 3.0f, 1.2f);
     A.spade_b = pg_mesh_bevel_box(10.0f, 13.0f, 2.2f, 1.6f);
     A.slot_m = A.decal;
+    A.trim = mesh_rainbow((WX1 - WX0) * 0.5f - 12.0f, 5.5f, 24);
 }
 
 void art_shutdown(void)
 {
     PG_Mesh **list[] = { &A.bar_top, &A.bar_bot, &A.bar_l, &A.bar_r, &A.post_t, &A.post_b, &A.panel, &A.tun_l, &A.tun_r, &A.tun_t, &A.tun_b,
                          &A.ground_tile, &A.sea_quad, &A.trunk_seg, &A.leaf_m, &A.coconut_m, &A.crate_m, &A.btn_cap, &A.btn_ring, &A.ball_m,
-                         &A.bucket_m, &A.bucket_cap, &A.stem_m, &A.decal, &A.spade_h, &A.spade_b };
+                         &A.bucket_m, &A.bucket_cap, &A.stem_m, &A.decal, &A.spade_h, &A.spade_b, &A.trim };
     for (size_t i = 0; i < sizeof list / sizeof *list; i++) { pg_mesh_free(*list[i]); *list[i] = NULL; }
     A.slot_m = NULL;
 }

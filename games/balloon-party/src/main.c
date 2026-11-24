@@ -11,15 +11,23 @@
  * Touch rules (see touch_* below): a finger that lands on a balloon pops it on that very tick (a landing
  * finger is by definition a slow touch). A finger that is moving slower than BAT_SPEED (250 px/s) pops each
  * new balloon it runs into; a faster one bats everything its path crosses. Nothing needs a precise position:
- * balloons have 16 px of forgiveness around them. */
+ * balloons have 16 px of forgiveness around them.
+ *
+ * A contact that has not moved for STILL_TICKS (a resting palm, or a beam stuck on the IR frame) stops counting
+ * as activity and its glow fades, so the hint hand still shows up and nothing sticks on the screen. */
 #include "bp.h"
 
-#include <stdlib.h>
 #include <string.h>
 
+#define STILL_TICKS 480                      /* 8 s without moving */
+#define STILL_FADE  60
+
+_Static_assert(MAX_BALLOONS <= 32, "the touch tracker keeps one bit per balloon slot in a uint32_t");
+
 typedef struct {
-    uint32_t inside;              /* bit per balloon slot the finger was inside last tick */
-    int      trail;
+    uint32_t inside;                         /* bit per balloon slot the finger was inside last tick */
+    int      trail;                          /* counts ticks of fast movement to space the sparkle trail */
+    int      still;                          /* ticks the contact has hardly moved */
 } Track;
 
 static Track trk[PG_MAX_TOUCH];
@@ -33,6 +41,8 @@ static int init(SDL_Renderer *r)
     room_init();
     balloons_init();
     fx_init();
+    memset(trk, 0, sizeof trk);
+    idle_s = 0.0f; ever_touched = false;
     return 0;
 }
 
@@ -40,7 +50,7 @@ static float finger_hue(const PG_Touch *t) { return fmodf(30.0f + 47.0f * (float
 
 static void touch_down(const PG_Touch *t, Track *k)
 {
-    k->inside = 0; k->trail = 0;
+    k->inside = 0; k->trail = 0; k->still = 0;
     for (int j = 0; j < balloon_slots(); j++) if (balloon_contains(j, t->x, t->y, HIT_PAD)) k->inside |= 1u << j;
     int pz = fx_prize_hit(t->x, t->y);
     if (pz >= 0) { fx_prize_pop(pz); return; }
@@ -62,6 +72,9 @@ static void touch_held(const PG_Touch *t, Track *k)
     float spd = sqrtf(t->vx * t->vx + t->vy * t->vy);
     bool fast = spd > BAT_SPEED;
 
+    k->still = hypotf(t->x - t->px, t->y - t->py) < 0.4f ? k->still + 1 : 0;
+    if (k->still > STILL_TICKS) return;                       /* a resting palm or a stuck beam: ignore */
+
     uint32_t now_in = 0;
     for (int j = 0; j < balloon_slots(); j++) {
         bool in = balloon_contains(j, t->x, t->y, HIT_PAD);
@@ -78,40 +91,49 @@ static void touch_held(const PG_Touch *t, Track *k)
     }
 }
 
-/* BP_DEBUG_BEGIN */
+#ifdef BP_DEBUG
+#include <stdlib.h>
 void balloons_debug_dump(void);
 static void debug_tick(void)
 {
-    const char *e = getenv("BP_DUMP");
+    const char *e = getenv("BP_DUMP");           /* dev only: comma separated ticks, e.g. BP_DUMP=149,160,175 */
     if (!e) return;
-    unsigned want = (unsigned)atoi(e);
-    if (want && pg_ticks() % want == 0) { pg_log("tick %llu balloons=%d", (unsigned long long)pg_ticks(), balloons_count()); balloons_debug_dump(); }
+    unsigned long long now = (unsigned long long)pg_ticks();
+    for (const char *q = e; *q; ) {
+        char *end;
+        unsigned long long v = strtoull(q, &end, 10);
+        if (end == q) break;
+        if (v == now) { pg_log("tick %llu balloons=%d", now, balloons_count()); balloons_debug_dump(); }
+        q = *end == ',' ? end + 1 : end;
+    }
 }
-/* BP_DEBUG_END */
+#endif
 
 static void update(void)
 {
     float t = pg_time();
     cam_update(t);
     const PG_Touch *T = pg_touches();
-    bool any = false;
+    bool active = false;
     for (int i = 0; i < PG_MAX_TOUCH; i++) {
         const PG_Touch *tc = &T[i];
         Track *k = &trk[i];
         switch (tc->state) {
-        case PG_TOUCH_DOWN: any = true; touch_down(tc, k); break;
-        case PG_TOUCH_HELD: any = true; touch_held(tc, k); break;
-        case PG_TOUCH_UP:   any = true; break;
+        case PG_TOUCH_DOWN: touch_down(tc, k); active = true; break;
+        case PG_TOUCH_HELD: touch_held(tc, k); if (k->still <= STILL_TICKS) active = true; break;
+        case PG_TOUCH_UP:   active = true; break;
         default: break;
         }
     }
-    if (any) { idle_s = 0.0f; ever_touched = true; } else idle_s += PG_DT;
+    if (active) { idle_s = 0.0f; ever_touched = true; } else idle_s += PG_DT;
     balloons_update(t);
     room_update(t);
     fx_update();
     snd_update();
     hint_update(idle_s, !ever_touched);
+#ifdef BP_DEBUG
     debug_tick();
+#endif
 }
 
 static void render(SDL_Renderer *r)
@@ -124,8 +146,11 @@ static void render(SDL_Renderer *r)
     fx_draw();
     hint_draw();
     const PG_Touch *T = pg_touches();
-    for (int i = 0; i < PG_MAX_TOUCH; i++)
-        if (T[i].state == PG_TOUCH_DOWN || T[i].state == PG_TOUCH_HELD) fx_touch_glow(&T[i]);
+    for (int i = 0; i < PG_MAX_TOUCH; i++) {
+        if (T[i].state != PG_TOUCH_DOWN && T[i].state != PG_TOUCH_HELD) continue;
+        if (trk[i].still <= STILL_TICKS + STILL_FADE)
+            fx_touch_glow(&T[i], 1.0f - smooth01((float)(trk[i].still - STILL_TICKS) / (float)STILL_FADE));
+    }
     room_draw_ambient();
     pg3d_end(r);
 }

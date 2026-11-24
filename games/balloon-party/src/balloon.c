@@ -234,12 +234,12 @@ static int spawn(bool below)
     float k = view_k(b->z);
     spawn_phase += 0.618034f; spawn_phase -= floorf(spawn_phase);
     b->x = c->ex + (spawn_phase * 2.0f - 1.0f) * 0.80f * 480.0f * k;
-    if (below) { b->y = c->ey - 270.0f * k - b->r * 1.6f - frand(0, 40); b->vy = 235.0f; b->grow = 1.0f; }
+    if (below) { b->y = c->ey - 270.0f * k - b->r * 1.25f - frand(0, 24); b->vy = 280.0f; b->grow = 1.0f; }
     else { b->y = c->ey + frand(-0.25f, 0.80f) * 270.0f * k; b->vy = frand(0, 30); b->grow = 1.0f; b->entered = true; }
     b->vx = frand(-18, 18);
     /* every balloon has its own altitude it floats at: some press against the ceiling, the rest hover at
      * different heights (0 = bottom edge of the view, 1 = top), and that height wanders slowly */
-    b->float_h = pg_randf() < 0.38f ? 1.25f : frand(0.12f, 0.86f);
+    b->float_h = pg_randf() < 0.30f ? 1.25f : frand(0.12f, 0.86f);
     b->home_x = frand(-0.85f, 0.85f);                            /* and a lazy home column so the room stays balanced */
     b->lift_w = frand(0.25f, 0.6f);
     b->lift_ph = frand(0, PG_TAU);
@@ -298,16 +298,22 @@ static int count_active(void)
 int balloons_count(void) { return count_active(); }
 int balloon_slots(void) { return MAX_BALLOONS; }
 
-/* BP_DEBUG_BEGIN */
+#ifdef BP_DEBUG
 void balloons_debug_dump(void)
 {
+    int vis = 0;
     for (int i = 0; i < MAX_BALLOONS; i++) {
         float sx, sy, sr;
-        if (B[i].alive && balloon_screen(i, &sx, &sy, &sr))
+        if (B[i].alive && balloon_screen(i, &sx, &sy, &sr) && sy - sr < 540.0f) vis++;
+    }
+    pg_log("  visible=%d", vis);
+    for (int i = 0; i < MAX_BALLOONS; i++) {
+        float sx, sy, sr;
+        if (getenv("BP_DUMP_ALL") && B[i].alive && balloon_screen(i, &sx, &sy, &sr))
             pg_log("  b%02d col=%d at (%.0f,%.0f) sr=%.0f z=%.0f v=(%.0f,%.0f) fh=%.2f%s", i, B[i].col, sx, sy, sr, B[i].z, B[i].vx, B[i].vy, B[i].float_h, B[i].retiring ? " retiring" : "");
     }
 }
-/* BP_DEBUG_END */
+#endif
 
 void balloons_update(float t)
 {
@@ -335,7 +341,7 @@ void balloons_update(float t)
         if (count_active() > cap) {
             int oldest = -1; float age = -1;
             for (int i = 0; i < MAX_BALLOONS; i++) if (B[i].alive && !B[i].retiring && B[i].age > age) { age = B[i].age; oldest = i; }
-            if (oldest >= 0) B[oldest].retiring = true;
+            if (oldest >= 0) { B[oldest].retiring = true; fx_burst(pg_v3(B[oldest].cx, B[oldest].cy, B[oldest].z + B[oldest].r * 0.5f), 45.0f * (float)B[oldest].col, 6, 110.0f); }
         }
     }
 
@@ -344,7 +350,7 @@ void balloons_update(float t)
     if (n < MIN_BALLOONS && spawn_cd > 0.22f) spawn_cd = 0.22f;
     if (spawn_cd <= 0) {
         if (n < cap) spawn(true);
-        spawn_cd = n < MIN_BALLOONS ? 0.22f : n < 18 ? frand(0.7f, 1.1f) : frand(2.0f, 3.2f);
+        spawn_cd = n < MIN_BALLOONS ? 0.22f : n < 16 ? frand(0.4f, 0.65f) : n < 22 ? frand(1.4f, 2.2f) : frand(2.6f, 3.6f);
     }
 
     for (int i = 0; i < MAX_BALLOONS; i++) {
@@ -366,17 +372,17 @@ void balloons_update(float t)
             float d = (sxs - gust_x) / 170.0f, w = expf(-d * d);
             ax += gust_dir * GUST_A * w; ay += GUST_A * 0.45f * w;
         }
-        if (b->entered) {                                        /* soft floor just below the screen: sinking balloons turn around */
-            float ymin = c->ey - 270.0f * k + 34.0f * k + 1.15f * b->r;
-            if (b->y < ymin) ay += 26.0f * (ymin - b->y);
-        }
+        /* a soft floor just above the bottom edge turns sinking balloons around; it is armed only once a balloon has
+         * risen above it, so balloons floating up from below the screen are not shoved */
+        float ymin = c->ey - 270.0f * k + 34.0f * k + 1.15f * b->r;
+        if (!b->entered && b->y > ymin) b->entered = true;
+        if (b->entered && b->y < ymin) ay += 6.0f * (ymin - b->y);
         float az = -1.1f * (b->z - b->z0);
         b->vx += ax * DT; b->vy += ay * DT; b->vz += az * DT;
         float f = 1.0f / (1.0f + DRAG * DT);
         b->vx *= f; b->vy *= f; b->vz *= 1.0f / (1.0f + 2.4f * DT);
         b->x += b->vx * DT; b->y += b->vy * DT; b->z += b->vz * DT;
         b->z = clampf(b->z, -110.0f, 110.0f);
-        if (!b->entered && b->y > c->ey - 270.0f * k) b->entered = true;
     }
 
     collide(true);
@@ -528,20 +534,30 @@ bool balloon_swept(int i, float x0, float y0, float x1, float y1, float pad)
     return qx * qx + qy * qy <= 1.0f;
 }
 
-int balloon_for_hint(void)
+/* a balloon worth pointing at: comfortably on screen, away from the top corners, big and near the middle.
+ * `cur` is kept while it is still a good choice, so the hand does not hop around. */
+static float hint_score(int i)
 {
-    int best = -1; float bs = -1e9f;
+    const Balloon *b = &B[i];
+    float sx, sy, sr;
+    if (!b->alive || b->retiring || !b->entered || !balloon_screen(i, &sx, &sy, &sr)) return -1e9f;
+    if (sy < 130 || sy > 420 || sx < 150 || sx > 810) return -1e8f;
+    return sr * 0.5f - hypotf(sx - 480.0f, (sy - 280.0f) * 1.3f) * 0.45f + b->z * 0.1f;
+}
+
+int balloon_for_hint(int cur, uint32_t cur_gen)
+{
+    int best = -1; float bs = -1e18f;
     for (int i = 0; i < MAX_BALLOONS; i++) {
-        const Balloon *b = &B[i];
-        if (!b->alive || b->retiring || !b->entered) continue;
-        float sx, sy, sr;
-        if (!balloon_screen(i, &sx, &sy, &sr)) continue;
-        if (sy < 130 || sy > 430 || sx < 150 || sx > 810) continue;
-        float score = sr * 0.5f - hypotf(sx - 480.0f, (sy - 300.0f) * 1.3f) * 0.45f + b->z * 0.1f;
-        if (score > bs) { bs = score; best = i; }
+        float sc = hint_score(i);
+        if (sc > bs) { bs = sc; best = i; }
+    }
+    if (cur >= 0 && balloon_alive(cur, cur_gen)) {
+        float cs = hint_score(cur);
+        if (cs > -1e7f && cs >= bs - 45.0f) return cur;
     }
     if (best < 0)
-        for (int i = 0; i < MAX_BALLOONS; i++) if (B[i].alive && !B[i].retiring && B[i].entered) { best = i; break; }
+        for (int i = 0; i < MAX_BALLOONS; i++) if (B[i].alive && !B[i].retiring) { best = i; break; }
     return best;
 }
 
@@ -565,13 +581,13 @@ void balloon_pop(int i)
         o->vx += dx / d * push; o->vy += dy / d * push; o->vz += dz / d * push * 0.5f;
         kick(o, dx, dy, -3.0f * w);
     }
-#ifdef BP_DEBUG_PRIZES
-    fx_prize(p);
+#ifdef BP_DEBUG
+    if (getenv("BP_PRIZES") || pg_randf() < 0.20f) fx_prize(p);     /* dev only: BP_PRIZES=1 releases a prize from every pop */
 #else
     if (pg_randf() < 0.20f) fx_prize(p);
 #endif
     b->alive = false;
-    if (spawn_cd > 0.6f) spawn_cd = frand(0.5f, 0.95f);
+    if (spawn_cd > 0.5f) spawn_cd = frand(0.3f, 0.7f);
 }
 
 void balloon_bat(int i, float svx, float svy)

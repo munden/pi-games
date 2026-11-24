@@ -5,7 +5,8 @@
  *   - shape matching pulls every particle toward the rest shape (only a fraction of the rotation is
  *     followed, so faces stay upright and blobs can never turn inside out),
  *   - an area ("pressure") constraint keeps the volume: squash a blob and it bulges,
- *   - soft edge limits stop the skin from over-stretching or collapsing,
+ *   - soft edge limits stop the skin from over-stretching or collapsing, and a curvature-aware smoothing removes
+ *     spikes and folds without touching the rest shape or gentle wobbles,
  *   - floor / walls / ceiling with friction, blob-vs-blob collision (circle repulsion between the
  *     centres plus boundary points pushed out of the neighbour's polygon).
  * Fingers are damped springs on the particles around the touched point; all forces, speeds and
@@ -62,7 +63,6 @@ typedef struct {
     int   held;                                              /* fingers currently holding it */
     int   floor_n;                                           /* particles that touched the floor last tick */
     int   air_ticks;                                         /* ticks since the floor was touched */
-    int   ground_ticks;                                      /* ticks since it left the floor (grounded run length) */
     int   wall_cool, bad_ticks;
     float land_boost;                                        /* impact speed waiting to be turned into a rebound */
     int   land_age;
@@ -71,7 +71,7 @@ typedef struct {
 
 typedef struct {
     bool  active;
-    int   blob, age;
+    int   blob;
     float fx, fy, fvx, fvy;                                  /* finger position and velocity (world) */
     float w[SB_NP];                                          /* how strongly each particle is pulled */
     float ox[SB_NP], oy[SB_NP];                              /* anchor offsets from the finger */
@@ -99,10 +99,9 @@ float soft_local_radius(const SoftBlob *b, float dx, float dy);
 int   soft_grab(SoftWorld *w, int finger, int blob, float x, float y);     /* start holding; returns the blob */
 void  soft_move(SoftWorld *w, int finger, float x, float y, float vx, float vy);
 void  soft_release(SoftWorld *w, int finger);
-bool  soft_holding(const SoftWorld *w, int finger);
 
 void  soft_poke(SoftWorld *w, int blob, float x, float y, float speed);  /* push the skin in at a point */
-void  soft_hop(SoftWorld *w, int blob, float up, float side);            /* jump (only when it stands on something) */
+void  soft_hop(SoftWorld *w, int blob, float up, float side);            /* give it a jump: up / sideways speed, px/s */
 void  soft_slap(SoftWorld *w, float x, float y, float range, float up);  /* the mat is slapped: blobs near it hop */
 
 int   soft_events(SoftWorld *w, const SoftEvent **out);                  /* events since the last call; clears them */

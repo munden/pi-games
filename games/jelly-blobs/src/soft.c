@@ -408,7 +408,7 @@ int soft_grab(SoftWorld *w, int finger, int blob, float x, float y)
         g->w[i] = 0.05f + 0.95f * expf(-(dx * dx + dy * dy) / sig2);
         g->ox[i] = dx; g->oy[i] = dy;
     }
-    g->active = true; g->blob = blob; g->age = 0;
+    g->active = true; g->blob = blob;
     g->fx = x; g->fy = y; g->fvx = g->fvy = 0;
     b->held++;
     if (w->nev < 48) { SoftEvent *e = &w->ev[w->nev++]; e->kind = SE_GRAB; e->a = blob; e->b = finger; e->speed = 0; e->x = x; e->y = y; }
@@ -421,7 +421,6 @@ void soft_move(SoftWorld *w, int finger, float x, float y, float vx, float vy)
     SoftGrab *g = &w->g[finger];
     g->fx = clampf(x, -2000, 2000); g->fy = clampf(y, -2000, 2000);
     g->fvx = clampf(vx, -2200, 2200); g->fvy = clampf(vy, -2200, 2200);
-    g->age++;
 }
 
 void soft_release(SoftWorld *w, int finger)
@@ -438,11 +437,6 @@ void soft_release(SoftWorld *w, int finger)
         for (int i = 0; i < SB_NP; i++) { b->vx[i] += dvx; b->vy[i] += dvy; }
     }
     if (w->nev < 48) { SoftEvent *e = &w->ev[w->nev++]; e->kind = SE_RELEASE; e->a = g->blob; e->b = finger; e->speed = sp; e->x = b->cx; e->y = b->cy; }
-}
-
-bool soft_holding(const SoftWorld *w, int finger)
-{
-    return finger >= 0 && finger < SB_FINGERS && w->g[finger].active;
 }
 
 /* ---------------------------------------------------------------------------- pokes */
@@ -648,10 +642,9 @@ void soft_step(SoftWorld *w)
                     b->land_boost = sp; b->land_age = 0;
                 }
             }
-            b->air_ticks = 0; b->ground_ticks++; b->grounded = true;
+            b->air_ticks = 0; b->grounded = true;
         } else {
             if (b->air_ticks < 100000) b->air_ticks++;
-            b->ground_ticks = 0;
             b->grounded = b->air_ticks < 4 && b->lowest < 8.0f;
         }
 
@@ -672,7 +665,6 @@ void soft_step(SoftWorld *w)
         else if (b->bad_ticks > 0) b->bad_ticks--;
     }
 
-    for (int f = 0; f < SB_FINGERS; f++) if (w->g[f].active) w->g[f].age++;
     w->ticks++;
 }
 

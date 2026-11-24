@@ -64,6 +64,8 @@ float  depth_k(float z);                       /* on-screen size factor of depth
 /* ----------------------------------------------------------------- textures */
 /* Upload a painted image (optionally 15-bit dithered, PS1 style) and free it. */
 PG_Tex tex_finish(PG_Image *im, bool ps1);
+/* Copy src into dst at (ox,oy): textures that belong together share one sheet (fewer, tidier atlas entries). */
+void img_blit(PG_Image *dst, const PG_Image *src, int ox, int oy);
 /* A sub-rectangle (in texels of the original image) of a texture returned by tex_finish. */
 PG_Tex tex_sub(PG_Tex sheet, int sheet_w, int sheet_h, int x, int y, int w, int h);
 

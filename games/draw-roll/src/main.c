@@ -26,6 +26,7 @@ static PG_World *world;
 static TouchInfo ti[PG_MAX_TOUCH];
 static float     load_ms, degrade;           /* my own CPU cost per frame (update + submit + pg3d), smoothed */
 static double    upd_ms;
+static bool      software_raster;            /* headless: the CPU also rasterises, so pg_frame_ms() says nothing about the Pi */
 
 static double now_ms(void) { return (double)SDL_GetPerformanceCounter() * 1000.0 / (double)SDL_GetPerformanceFrequency(); }
 
@@ -49,8 +50,8 @@ static void on_contact(PG_Body *a, PG_Body *b, float impact, float x, float y, v
     case TAG_STROKE: {
         bool fresh = strokes_contact(other);
         if (fresh && impact > 120.0f) {
-            int step = 2 + (int)clampf((y + 260.0f) / 520.0f * 8.0f, 0.0f, 8.0f);        /* higher on the screen = higher note */
-            float vol = 0.12f + 0.34f * clampf((impact - 120.0f) / 900.0f, 0.0f, 1.0f);
+            int step = 2 + (int)clampf((y + 260.0f) / 520.0f * 7.0f, 0.0f, 7.0f);        /* higher on the screen = higher note */
+            float vol = 0.10f + 0.24f * clampf((impact - 120.0f) / 900.0f, 0.0f, 1.0f);
             snd_note(step, vol, 430.0f);
             if (impact > 220.0f) fx_burst(x, y, 30.0f, impact > 520.0f ? 2 : 1, 110.0f, 20.0f + (float)step * 30.0f, 30.0f, 13.0f);
         }
@@ -92,7 +93,7 @@ static void touch_down(int i, const PG_Touch *p, const PG_V3 *w)
     int c = strokes_next_color();
     strokes_pen_down(i, w->x, w->y, c);
     fx_burst(w->x, w->y, 44.0f, 7, 190.0f, 20.0f + (float)c * 36.0f, 35.0f, 20.0f);   /* instant sparkle: a tap is always answered */
-    snd_note(2 + c, 0.27f, 520.0f);
+    snd_note(2 + (c % 8), 0.26f, 520.0f);
     toys_look_at(w->x, w->y);
     if (toys_hit_dispenser(p->x, p->y)) balls_drop();
 }
@@ -117,7 +118,7 @@ static void touch_up(int i, const PG_Touch *p, const PG_V3 *w)
         strokes_pen_up(i);
     } else if (k->kind == TK_SPONGE) {
         toys_sponge_press(false);
-        if (toys_hit_sponge(p->x, p->y) && p->ticks <= 150) do_wipe();     /* a tap, not a resting palm */
+        if (toys_hit_sponge(p->x, p->y) && p->ticks >= 3 && p->ticks <= 150) do_wipe();   /* a real tap: not a 1-frame sensor blip, not a resting palm */
     }
     k->kind = TK_NONE;
 }
@@ -145,11 +146,13 @@ static int init(SDL_Renderer *r)
     (void)r;
     world = pg_world_new(0.0f, -900.0f);
     if (!world) pg_fatal("draw-roll: out of memory (physics)");
+    const char *drv = SDL_GetCurrentVideoDriver();
+    software_raster = drv && strcmp(drv, "dummy") == 0;
     pg_world_set_quality(world, 3, 12);                  /* 3 substeps: fast balls cannot tunnel through thin ramps */
     pg_world_set_contact_fn(world, on_contact, NULL);
 
     pg3d_sky(pg_hex(0x6EC0FF), pg_hex(0xFFEBC8));
-    pg3d_light(pg_v3(-0.42f, 0.78f, 0.62f), pg_rgb(214, 204, 186), pg_rgb(176, 186, 214), pg_rgb(146, 136, 128));
+    pg3d_light(pg_v3(-0.42f, 0.78f, 0.62f), pg_rgb(214, 204, 186), pg_rgb(178, 188, 218), pg_rgb(150, 148, 178));
 
     fx_init();
     scene_init();
@@ -180,9 +183,6 @@ static void update(void)
     pg_world_step(world, PG_DT);
     fx_update(degrade);
     upd_ms = now_ms() - t0;
-#ifdef DR_STATS
-    if (pg_ticks() % 60 == 0) pg_log("stats t=%d pieces=%d total=%d spheres=%d balls=%d fx=%d tris=%d load=%.2f upd=%.2f bodies=%d", (int)(pg_ticks() / 60), strokes_count(), strokes_total(), strokes_spheres(), balls_count(), fx_count(), pg3d_last_tris(), load_ms, upd_ms, pg_world_count(world));
-#endif
 }
 
 static void render(SDL_Renderer *r)
@@ -206,7 +206,8 @@ static void render(SDL_Renderer *r)
     /* my CPU cost, excluding the (software) rasteriser: on the Pi ~12 ms here means "stop piling things on" */
     float cur = (float)(upd_ms + (t1 - t0 - pre3d) + pg3d_cpu_ms());
     load_ms = load_ms == 0.0f ? cur : load_ms * 0.93f + cur * 0.07f;
-    degrade = clampf((load_ms - 9.0f) / 6.0f, 0.0f, 1.0f);
+    float busy = software_raster ? load_ms : fmaxf(load_ms, pg_frame_ms());   /* on the device the SDK's own number counts too */
+    degrade = clampf((busy - 9.0f) / 6.0f, 0.0f, 1.0f);
 }
 
 static void shutdown(void)

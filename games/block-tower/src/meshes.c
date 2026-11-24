@@ -141,8 +141,15 @@ void meshes_build(Game *g)
     m->bracket = reg(m, pg_mesh_bevel_box(5, 17, 26, 2));
     m->curtain = reg(m, mesh_curtain(52, 206, 6));
     m->mini = reg(m, pg_mesh_bevel_box(16, 16, 16, 3));
+    m->poster = reg(m, pg_mesh_quad(30, 38));
+    m->poster_frame = reg(m, pg_mesh_bevel_box(36, 44, 4, 3));
+    m->car_body = reg(m, pg_mesh_bevel_box(40, 13, 23, 4));
+    m->car_cab = reg(m, pg_mesh_bevel_box(21, 10, 19, 4));
+    m->wheel = reg(m, pg_mesh_cylinder(1.0f, 1.0f, 10));
+    mesh_rot_x(m->wheel, PG_PI * 0.5f);
 
     m->sph = reg(m, pg_mesh_sphere(1.0f, 9, 6));
+    m->sph_lo = reg(m, pg_mesh_sphere(1.0f, 6, 4));      /* tiny parts: ears, noses, eyes, lamps */
     m->cone = reg(m, pg_mesh_cone(1.0f, 1.0f, 10));
     m->cyl = reg(m, pg_mesh_cylinder(1.0f, 1.0f, 10));
     m->torus = reg(m, pg_mesh_torus(1.0f, 0.3f, 12, 6));

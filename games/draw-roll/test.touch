@@ -7,12 +7,14 @@ drag   44 46 0 170 150 420 290
 drag   52 52 1 790 140 560 275
 wave   66 70 2 255 345 60 1.3
 drag   84 44 3 640 90 760 200
-# 3. a tap on empty sky just sparkles; the cloud again; a held finger
+# 3. a tap on empty sky just sparkles; the cloud again and again; a held finger; a short drag
 tap   120 4 330 120
 tap   140 5 480 105
 hold  150 40 6 620 380
 drag  156 40 7 360 330 470 400
-# 4. ten fingers scribble at once for a while
-fuzz  236 56 10
-# 5. the sponge washes everything away
-tap   292 8 108 462
+tap   176 8 500 105
+tap   196 9 470 100
+# 4. ten fingers scribble at once (slots 0-9)
+fuzz  248 52 10
+# 5. the sponge (slot 12 is free of the scribbling fingers) washes everything away
+tap   290 12 108 462

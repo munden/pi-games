@@ -11,11 +11,12 @@
 #define N_SWAGS    2
 #define N_FLAGS    8
 #define N_DUST     18
+#define N_STREAM   6
 
 static PG_Mesh *m_wall, *m_wain, *m_trim, *m_trim_under, *m_floor, *m_rug, *m_glass, *m_rainbow;
 static PG_Mesh *m_bar_v, *m_bar_h, *m_mull_v, *m_mull_h, *m_sill, *m_rail, *m_base, *m_twine, *m_hat;
-static PG_Mesh *m_gift[N_PRESENTS];
-static PG_Tex t_wall, t_trim, t_wain, t_floor, t_rug, t_win[2], t_frame, t_gift[N_PRESENTS], t_bow[N_PRESENTS], t_flags, t_twine, t_rainbow, t_hat;
+static PG_Mesh *m_gift[N_PRESENTS], *m_stream[N_STREAM];
+static PG_Tex t_wall, t_trim, t_wain, t_floor, t_rug, t_win[2], t_frame, t_gifts, t_bows, t_streams, t_flags, t_twine, t_rainbow, t_hat;
 
 typedef struct { float x, y, z, vx, vy, ph; } Dust;
 static Dust dust[N_DUST];
@@ -26,7 +27,7 @@ static Flag flags[N_SWAGS * N_FLAGS];
 
 /* centre x, z, half extents, bevel, yaw, bow? */
 static const struct { float x, z, hx, hy, hz, bev, yaw; bool bow; } GIFT[N_PRESENTS] = {
-    { -392.0f, -150.0f, 78.0f, 62.0f, 66.0f, 12.0f,  0.10f, true },
+    { -392.0f, -150.0f, 78.0f, 62.0f, 66.0f, 12.0f,  0.10f, false },
     { -394.0f, -150.0f, 44.0f, 38.0f, 44.0f,  8.0f, -0.45f, true },
     {  404.0f, -120.0f, 70.0f, 52.0f, 60.0f, 11.0f, -0.18f, true },
     {  292.0f,  -44.0f, 40.0f, 36.0f, 40.0f,  8.0f,  0.38f, false },
@@ -100,6 +101,29 @@ static PG_Mesh *strip_under(float x0, float x1, float y, float z0, float z1)
     return build_done(&b);
 }
 
+/* crepe-paper streamers hang from the ceiling in the corners: a gentle S-curve, twisting so the visible width
+ * breathes between wide and thin (shade follows the twist), swaying a little in the draught */
+static const struct { float x, y, len, amp, ph, twist, W; } STREAM[N_STREAM] = {
+    { -700.0f, 440.0f, 330.0f, 26.0f, 0.4f, 2.6f, 30.0f }, { -640.0f, 440.0f, 430.0f, 30.0f, 2.1f, 3.1f, 28.0f }, { -580.0f, 440.0f, 260.0f, 22.0f, 4.0f, 2.2f, 28.0f },
+    {  585.0f, 440.0f, 280.0f, 24.0f, 1.2f, 2.4f, 28.0f }, {  645.0f, 440.0f, 440.0f, 30.0f, 3.3f, 3.0f, 30.0f }, {  705.0f, 440.0f, 340.0f, 26.0f, 5.2f, 2.7f, 28.0f },
+};
+
+static PG_Mesh *streamer_mesh(int k)
+{
+    const int n = 22;
+    Build b = build_new((n + 1) * 2, n * 6);
+    float u0 = (float)(k & 3) * 0.25f + 0.01f, u1 = u0 + 0.23f;
+    for (int i = 0; i <= n; i++) {
+        float t = (float)i / (float)n, tw = cosf(t * PG_PI * STREAM[k].twist + STREAM[k].ph), aw = fabsf(tw);
+        float cx = STREAM[k].amp * sinf(t * PG_PI * 1.7f + STREAM[k].ph) * t, y = -STREAM[k].len * t, w = STREAM[k].W * (0.22f + 0.78f * aw) * 0.5f;
+        PG_Color c = pg_rgb((uint8_t)(150.0f + 105.0f * aw), (uint8_t)(150.0f + 105.0f * aw), (uint8_t)(150.0f + 105.0f * aw));
+        build_vert(&b, cx - w, y, 0, 0, 0, 1, u0, t, c);
+        build_vert(&b, cx + w, y, 0, 0, 0, 1, u1, t, c);
+    }
+    for (int i = 0; i < n; i++) { int a = i * 2; build_tri(&b, a, a + 1, a + 3); build_tri(&b, a, a + 3, a + 2); }
+    return build_done(&b);
+}
+
 static float swag_y(float s, float sag) { return 372.0f - 4.0f * sag * s * (1.0f - s); }
 
 /* ------------------------------------------------------------------ init */
@@ -111,14 +135,11 @@ void room_init(void)
     t_win[1] = tex_upload(paint_window(1), true);  t_frame = tex_upload(paint_frame(), true);
     t_flags = tex_upload(paint_flags(), true);     t_twine = tex_upload(paint_twine(), true);
     t_rainbow = tex_upload(paint_rainbow(), true);
+    t_streams = tex_upload(paint_streamers(), true);
     t_hat = tex_upload(paint_streamer(0xFF7EB6, 0xFFE9F3), true);
-    static const uint32_t paper[N_PRESENTS] = { 0x4B8BFF, 0xFF5252, 0x39C46A, 0xA66BFF };
-    static const uint32_t ribn[N_PRESENTS] = { 0xFFD23F, 0xFFFFFF, 0xFF7EB8, 0xFFD23F };
-    for (int k = 0; k < N_PRESENTS; k++) {
-        t_gift[k] = tex_upload(paint_gift(paper[k], ribn[k], k % 3), true);
-        t_bow[k] = tex_upload(paint_bow(ribn[k] == 0xFFFFFF ? 0xFFF3F3 : ribn[k]), false);
-        m_gift[k] = pg_mesh_bevel_box(GIFT[k].hx, GIFT[k].hy, GIFT[k].hz, GIFT[k].bev);
-    }
+    t_gifts = tex_upload(paint_gifts(), true);
+    t_bows = tex_upload(paint_bows(), false);
+    for (int k = 0; k < N_PRESENTS; k++) m_gift[k] = pg_mesh_bevel_box(GIFT[k].hx, GIFT[k].hy, GIFT[k].hz, GIFT[k].bev);
 
     m_wall = grid_xy(-864.0f, 864.0f, FLOOR_Y, FLOOR_Y + 768.0f, WALL_Z, 9, 4, true);
     m_wain = grid_xy(-896.0f, 896.0f, FLOOR_Y, -60.0f, WALL_Z + 3.0f, 14, 1, true);
@@ -136,6 +157,7 @@ void room_init(void)
     m_rail = pg_mesh_bevel_box(900.0f, 11.0f, 10.0f, 4.0f);
     m_base = pg_mesh_box(900.0f, 17.0f, 8.0f);
     m_hat = pg_mesh_cone(27.0f, 40.0f, 10);
+    for (int k = 0; k < N_STREAM; k++) m_stream[k] = streamer_mesh(k);
 
     /* bunting: a twine swag per span, flags hang off it */
     const float xs[N_SWAGS + 1] = { -800.0f, 0.0f, 800.0f };
@@ -177,7 +199,8 @@ void room_init(void)
 void room_free(void)
 {
     PG_Mesh *all[] = { m_wall, m_wain, m_trim, m_trim_under, m_floor, m_rug, m_glass, m_rainbow, m_bar_v, m_bar_h, m_mull_v, m_mull_h,
-                       m_sill, m_rail, m_base, m_twine, m_hat, m_gift[0], m_gift[1], m_gift[2], m_gift[3] };
+                       m_sill, m_rail, m_base, m_twine, m_hat, m_gift[0], m_gift[1], m_gift[2], m_gift[3],
+                       m_stream[0], m_stream[1], m_stream[2], m_stream[3], m_stream[4], m_stream[5] };
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) pg_mesh_free(all[i]);
 }
 
@@ -243,6 +266,10 @@ void room_draw_floor(void)
     PG_Color white = pg_rgb(255, 255, 255);
     pg3d_mesh(m_twine, t_twine, &I, white, PG3D_BG | PG3D_TWOSIDED | PG3D_UNLIT);
     for (int i = 0; i < N_SWAGS * N_FLAGS; i++) flag_tri(&flags[i], now_t);
+    for (int k = 0; k < N_STREAM; k++) {
+        m = pg_m4_mul(pg_m4_translate(STREAM[k].x, STREAM[k].y, WALL_Z + 56.0f + (float)k), pg_m4_rot_z(sinf(now_t * 0.85f + STREAM[k].ph) * 0.045f));
+        pg3d_mesh(m_stream[k], tex_sub(t_streams, (k & 3) * 32, 0, 32, 32, 128, 32), &m, white, PG3D_BG | PG3D_TWOSIDED);
+    }
 
     pg3d_mesh(m_floor, t_floor, &I, white, PG3D_BG);
     pg3d_mesh(m_rug, t_rug, &I, white, PG3D_BG);
@@ -251,10 +278,10 @@ void room_draw_floor(void)
         if (k == 1) cy = FLOOR_Y + 2.0f * GIFT[0].hy + GIFT[1].hy;
         if (k != 1) pg3d_blob_shadow(GIFT[k].x + 8.0f, FLOOR_Y + 2.0f, GIFT[k].z + 6.0f, GIFT[k].hx * 1.7f, 0.42f);
         m = pg_m4_mul(pg_m4_translate(GIFT[k].x, cy, GIFT[k].z), pg_m4_rot_y(GIFT[k].yaw));
-        pg3d_mesh(m_gift[k], t_gift[k], &m, white, PG3D_BG);
+        pg3d_mesh(m_gift[k], tex_sub(t_gifts, (k & 1) * 32, (k >> 1) * 32, 32, 32, 64, 64), &m, white, PG3D_BG);
         if (GIFT[k].bow) {
             PG_V3 bp = pg_v3(GIFT[k].x, cy + GIFT[k].hy + 12.0f, GIFT[k].z + GIFT[k].hz * 0.45f);
-            pg3d_sprite(t_bow[k], bp, 72.0f, 72.0f, 0.0f, white, PG3D_BG);
+            pg3d_sprite(tex_sub(t_bows, k * 32, 0, 32, 32, 128, 32), bp, 72.0f, 72.0f, 0.0f, white, PG3D_BG);
         }
     }
     /* a party hat on the small purple present, with a pompom */
@@ -268,7 +295,7 @@ void room_draw_floor(void)
 void room_draw_ambient(void)
 {
     float t = now_t, pulse = 0.82f + 0.18f * sinf(t * 0.7f);
-    static const float beam[2][6] = { { -432.0f, -300.0f, 235.0f, 370.0f, -440.0f, 0.17f }, { -250.0f, -196.0f, 110.0f, 310.0f, -330.0f, 0.12f } };
+    static const float beam[2][6] = { { -432.0f, -300.0f, 235.0f, 370.0f, -440.0f, 0.23f }, { -250.0f, -196.0f, 110.0f, 310.0f, -330.0f, 0.16f } };
     const unsigned fl = PG3D_ADDITIVE | PG3D_UNLIT | PG3D_TWOSIDED | PG3D_NOFOG;
     for (int k = 0; k < 2; k++) {
         float x0 = beam[k][0], x1 = beam[k][1], y0 = beam[k][2], dx = beam[k][3], dy = beam[k][4], a = beam[k][5] * pulse;

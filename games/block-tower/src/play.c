@@ -10,7 +10,7 @@
 #include <string.h>
 
 #define BLOCK_DENSITY   0.0005f
-#define BALL_DENSITY    0.0006f
+#define BALL_DENSITY    0.0010f
 #define GRAB_FREQ       5.0f
 #define GRAB_DAMP       0.8f
 #define PICK_PAD        14.0f             /* hit-test padding around anything grabbable (px) */
@@ -18,7 +18,7 @@
 #define THROW_MAX       1300.0f           /* fastest throw (px/s) */
 #define HOLD_MAX        1500.0f           /* fastest a held block may move: thin blocks never tunnel */
 #ifndef HINT_AFTER
-#define HINT_AFTER      3.0f              /* seconds untouched before the hint hand shows */
+#define HINT_AFTER      2.0f              /* seconds untouched before the hint hand shows (fully visible well inside 3 s) */
 #endif
 #ifndef ATTRACT_AFTER
 #define ATTRACT_AFTER   20.0f             /* seconds untouched before a ball rolls in (tests may shorten it) */
@@ -471,8 +471,8 @@ static void on_contact(PG_Body *a, PG_Body *bo, float speed, float x, float y, v
     }
     Block *ba = a->tag == TAG_BLOCK ? a->user : NULL, *bb = bo->tag == TAG_BLOCK ? bo->user : NULL;
     squash_hit(ba, speed, x, y); squash_hit(bb, speed, x, y);
-    if (speed > 230.0f) fx_dust(g, x, y, 50, 2 + (int)(speed / 260.0f), 30.0f);
-    if (speed > 440.0f) fx_stars(g, x, y, 56, 2 + (int)(speed / 700.0f), 150, 18);
+    if (speed > 230.0f) fx_dust(g, x, y, 50, (int)bt_clampf(2.0f + speed / 260.0f, 2.0f, 6.0f), 30.0f);
+    if (speed > 440.0f) fx_stars(g, x, y, 56, (int)bt_clampf(2.0f + speed / 700.0f, 2.0f, 5.0f), 150, 18);
     if (g->snd_tokens < 1.0f) return;
     if ((ba && ba->snd_cd > 0 && (!bb || bb->snd_cd > 0)) || (!ba && bb && bb->snd_cd > 0)) return;
     float v = bt_clampf((speed - 45.0f) / 900.0f, 0.0f, 1.0f), vol = 0.16f + 0.5f * v;
@@ -628,7 +628,6 @@ static void fingers_apply(Game *g, float dt)
             pg_body_grab_step(p, f->lx, f->ly, tx, ty, GRAB_FREQ, GRAB_DAMP, dt);
             float sp = pg_body_speed(p);
             if (sp > HOLD_MAX) { p->vx *= HOLD_MAX / sp; p->vy *= HOLD_MAX / sp; }
-/*DBG*/ if (pg_ticks() % 6 == 0) fprintf(stderr, "grab tick=%llu target=(%.0f,%.0f) body=(%.0f,%.0f) ang=%.2f v=%.0f\n", (unsigned long long)pg_ticks(), tx, ty, p->x, p->y, p->angle, sp);
         }
         else if (f->mode == F_PUSH && f->pad) {
             float vx = (tx - f->pad->x) / dt, vy = (ty - f->pad->y) / dt, sp = hypotf(vx, vy);
@@ -648,7 +647,7 @@ static Block *hint_target(Game *g)
         if (!b->body || b->kind != KIND_BOX) continue;
         float top = b->body->y + bt_shape(b->type)->hy;
         if (!any || b->body->y > any->body->y) any = b;
-        if (top < CEIL_Y - 175.0f && (!best || b->body->y > best->body->y)) best = b;
+        if (top < CEIL_Y - 110.0f && (!best || b->body->y > best->body->y)) best = b;
     }
     return best ? best : any;
 }
@@ -723,7 +722,10 @@ static void idle_update(Game *g, float dt)
             if (g->giggle_t <= 0) {
                 g->giggle_t = pg_rand_range(0.9f, 1.8f);
                 Block *b = &g->blocks[pg_rand_int(0, MAX_BLOCKS - 1)];
-                if (b->body && b->kind == KIND_BOX && !b->holders) { b->squash_axis = 0; b->squash_v += 2.0f; }
+                if (b->body && b->kind == KIND_BOX && !b->holders) {
+                    b->squash_axis = 0; b->squash_v += 2.0f;
+                    fx_stars(g, b->body->x, b->body->y + bt_shape(b->type)->hy, 50, 1, 45, 14);
+                }
             }
         }
     }
@@ -789,6 +791,12 @@ static void ghosts_update(Game *g, float dt)
         g->phase = PH_PLAY;
         if (g->auto_rebuild) g->idle_t = HINT_AFTER - 0.5f;
         g->auto_rebuild = 0;
+        g->tada = 1; g->tada_cd = 0.25f;                   /* everything has landed: a little rising chime and stars on each tower */
+        for (int grp = 0; grp < 5; grp++) {
+            const Place *top = NULL;
+            for (int i = 0; i < g->plan.n; i++) if (g->plan.p[i].group == grp && g->plan.p[i].kind == KIND_BOX && (!top || g->plan.p[i].y > top->y)) top = &g->plan.p[i];
+            if (top) fx_stars(g, top->x, top->y + bt_shape(top->type)->hy + 8.0f, 56, 5, 170, 22);
+        }
     }
 }
 
@@ -811,23 +819,21 @@ static void blocks_update(Game *g, float dt)
 }
 
 
-/*DBG*/ #include <stdio.h>
-/*DBG*/ static void dbg_dump(Game *g, const char *tag)
-/*DBG*/ {
-/*DBG*/     fprintf(stderr, "DUMP %s tick=%llu\n", tag, (unsigned long long)pg_ticks());
-/*DBG*/     for (int i = 0; i < MAX_BLOCKS; i++) { Block *b = &g->blocks[i]; if (!b->body) continue;
-/*DBG*/         fprintf(stderr, "  #%02d k%d t%d  x=%7.1f y=%7.1f a=%6.3f v=%6.1f\n", i, b->kind, b->type, b->body->x, b->body->y, b->body->angle, pg_body_speed(b->body)); }
-/*DBG*/ }
 
 void play_update(Game *g)
 {
-/*DBG*/ { uint64_t tk = pg_ticks(); if (tk == 3 || tk == 400 || tk == 1000) dbg_dump(g, "t"); if (tk >= 50 && tk <= 60) { int nd = 0, ns = 0; for (int i = 0; i < MAX_PARTS; i++) { if (g->parts[i].kind == PT_DUST) { nd++; if (nd < 3) fprintf(stderr, "dust x=%.0f y=%.0f z=%.0f sz=%.0f life=%.2f/%.2f\n", g->parts[i].p.x, g->parts[i].p.y, g->parts[i].p.z, g->parts[i].size, g->parts[i].life, g->parts[i].max); } if (g->parts[i].kind == PT_STAR) ns++; } fprintf(stderr, "tick %llu dust=%d stars=%d\n", (unsigned long long)tk, nd, ns); } }
     const float dt = PG_DT;
-    g->snd_tokens = fminf(3.0f, g->snd_tokens + dt * 22.0f);
+    g->snd_tokens = fminf(2.5f, g->snd_tokens + dt * 16.0f);
     if (g->spawn_cd > 0) g->spawn_cd -= dt;
     if (g->press > 0) g->press = fmaxf(0, g->press - dt * 3.2f);
     if (g->lid_kick > 0) g->lid_kick = fmaxf(0, g->lid_kick - dt * 5.0f);
 
+    if (g->tada > 0 && (g->tada_cd -= dt) <= 0) {
+        static const int tada_steps[3] = { 4, 6, 9 };
+        pg_sfx_chime(tada_steps[g->tada - 1], 0.4f);
+        g->tada_cd = 0.16f;
+        if (++g->tada > 3) g->tada = 0;
+    }
     fingers_update(g);
     idle_update(g, dt);
     ghosts_update(g, dt);

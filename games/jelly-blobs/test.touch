@@ -2,12 +2,14 @@
 # canvas px: the blobs rest in a row near y=400 (strawberry, lime, grape, lemon, sky, orange)
 tap    24 0 270 410                       # poke the lime blob: squish + giggle
 tap    38 1 135 390                       # poke the strawberry
-drag   52 36 2 556 405 530 280            # lift the lemon blob by one finger (it droops, the neighbours get nudged)
-hold   96 30 3 530 280                    # ... and hold it up there
+drag   52 36 2 556 405 530 280            # lift the lemon blob by one finger: it droops, the neighbours get nudged
+hold   88 160 3 530 280                   # ... and hold it up there
 drag  100 16 4 480 505 470 505            # slap the mat: blobs standing nearby hop
-drag  120 45 5 642 412 575 380            # two fingers on the sky blob, pulling apart like dough
-drag  120 45 6 768 412 850 372
-hold  165 25 5 575 380
-hold  165 25 6 850 372
+drag  120 45 5 648 418 575 392            # two fingers on the sky blob, pulling apart like dough
+drag  120 45 6 765 418 855 380
+hold  165 80 5 575 392
+hold  165 80 6 855 380
 drag  176 12 7 115 400 420 335            # a fast fling across the room
-fuzz  196 110 10                          # then ten fingers at once, dragging everything
+drag  196 40 8 400 380 330 250            # lift the grape blob by its shoulder
+hold  236 30 8 330 250
+fuzz  232 80 10                           # ten fingers at once, dragging everything

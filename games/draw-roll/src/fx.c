@@ -30,13 +30,6 @@ void fx_init(void)
 
 void fx_shutdown(void) {}
 
-int fx_count(void)
-{
-    int n = 0;
-    for (int i = 0; i < MAX_P; i++) n += P[i].kind != K_FREE;
-    return n;
-}
-
 static Particle *alloc_p(void)
 {
     for (int k = 0; k < MAX_P; k++) {

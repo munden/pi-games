@@ -43,9 +43,6 @@ static Hint  hint;
 static float idle_t;                  /* seconds since a real finger last touched anything */
 static float chime_cool;
 static uint32_t life_ticks;
-#ifdef JB_DEBUG
-static int dbg_heals;
-#endif
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static inline float ease(float t) { t = clampf(t, 0, 1); return t * t * (3.0f - 2.0f * t); }
@@ -239,7 +236,7 @@ static void blob_think(int i)
     f->jx += f->jvx * dt; f->jy += f->jvy * dt;
 
     /* the leaf / antenna on top swings behind the motion */
-    float at = clampf(-b->vcx * 0.0011f + b->tilt * 0.6f, -0.55f, 0.55f);
+    float at = clampf(b->vcx * 0.0011f + b->tilt * 0.6f, -0.55f, 0.55f);     /* counter-clockwise: moving right, the tip lags to the left */
     f->acc_v += ((at - f->acc_a) * 110.0f - f->acc_v * 4.5f) * dt; f->acc_a += f->acc_v * dt;
 
     /* expression follows the deformation */
@@ -423,9 +420,6 @@ static void handle_events(void)
             break;
         }
         case SE_HEAL:
-#ifdef JB_DEBUG
-            dbg_heals++; pg_log("HEAL blob %d at tick %u", e->a, W.ticks);
-#endif
             pg_sfx_sparkle(0.25f);
             burst(P_SPARK, e->x, e->y, 6, 160.0f, 40.0f, pg_rgb(255, 255, 255));
             break;
@@ -462,16 +456,11 @@ static void update(void)
     handle_events();
     notes_update();
 
-#ifdef JB_DEBUG
-    if (W.ticks % 30 == 0)
-        for (int i = 0; i < W.n; i++)
-            pg_log("t=%u blob %d c=(%.0f,%.0f) w=%.0f h=%.0f held=%d air=%d mouth=%d", W.ticks, i, W.b[i].cx, W.b[i].cy, W.b[i].maxx - W.b[i].minx, W.b[i].maxy - W.b[i].miny, W.b[i].held, W.b[i].air_ticks, fx[i].mouth);
-#endif
     for (int i = 0; i < MAX_PARTS; i++) {
         Part *p = &parts[i];
         if (p->life <= 0) continue;
         p->life -= PG_DT;
-        if (p->kind == P_PUFF) { p->vx *= 0.96f; p->vy = p->vy * 0.96f + 8.0f * PG_DT * 60.0f * 0.02f; p->size += 36.0f * PG_DT; }
+        if (p->kind == P_PUFF) { p->vx *= 0.96f; p->vy = p->vy * 0.96f + 10.0f * PG_DT; p->size += 36.0f * PG_DT; }   /* dust drifts up and spreads */
         else p->vy -= 420.0f * PG_DT;
         p->x += p->vx * PG_DT; p->y += p->vy * PG_DT; p->rot += p->vrot * PG_DT;
     }
@@ -548,9 +537,6 @@ static void render(SDL_Renderer *r)
 
 static void shutdown(void)
 {
-#ifdef JB_DEBUG
-    pg_log("debug: heals=%d", dbg_heals);
-#endif
     scene_shutdown();
 }
 

@@ -41,7 +41,7 @@ static uint32_t spx[SD_W * SD_H];        /* pre-painted pixels of static cells *
 static uint8_t  act[CW * CHN], dirty[CW * CHN];
 static uint32_t rng = 0x2545F491u, tick;
 static int      n_sand, capacity, ceil_count;
-static uint32_t sand_lut[N_SAND + 1][3]; /* [id][0 dark, 1 normal, 2 lit] */
+static uint32_t sand_lut[N_SAND + 1][4]; /* [id][0 dark, 1 normal, 2 lit, 3 moving] */
 static SDL_Texture *tex;
 
 static struct {
@@ -51,8 +51,13 @@ static struct {
     float close_fill;
 } door;
 static int drained_n; static uint8_t drained_h[16]; static uint8_t drained_x[16];
+#define MAX_GLINT  10
+#define GLINT_LIFE 40
+static struct { int i, life; } glint[MAX_GLINT];
+static uint32_t glint_clock;
 
 static double st_sim_ms, st_sim_max, st_light_ms; static long st_ticks, st_frames, st_cells;
+static float cpu_avg_ms;
 
 static inline uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 static inline double now_ms(void) { return (double)SDL_GetPerformanceCounter() * 1000.0 / (double)SDL_GetPerformanceFrequency(); }
@@ -90,12 +95,12 @@ uint32_t sand_hue_argb(int hue)
 static void build_sand_lut(void)
 {
     static const float vm[4] = { 0.88f, 0.96f, 1.03f, 1.10f };
-    static const float sm[3] = { 0.68f, 1.0f, 1.16f };
+    static const float sm[4] = { 0.68f, 1.0f, 1.16f, 1.07f };
     for (int h = 0; h < SD_HUES; h++) {
         PG_Color b = hue_color(h);
         for (int s = 0; s < 4; s++)
-            for (int k = 0; k < 3; k++) {
-                float m = vm[s] * sm[k], mix = (k == 2) ? 0.20f : 0.0f;
+            for (int k = 0; k < 4; k++) {
+                float m = vm[s] * sm[k], mix = (k == 2) ? 0.20f : (k == 3) ? 0.07f : 0.0f;
                 float rr = b.r * m, gg = b.g * m, bb = b.b * m;
                 if (k == 0) { rr *= 0.92f; bb = bb * 1.05f + 6.0f; }    /* shaded side leans cool */
                 rr += (255.0f - rr) * mix; gg += (255.0f - gg) * mix; bb += (255.0f - bb) * mix;
@@ -197,7 +202,7 @@ void sand_reset(void)
 {
     build_level(); paint_static(); count_capacity();
     memset(act, 0, sizeof act); memset(dirty, 1, sizeof dirty);
-    n_sand = 0; ceil_count = 0; drained_n = 0;
+    n_sand = 0; ceil_count = 0; drained_n = 0; memset(glint, 0, sizeof glint);
     memset(&door, 0, sizeof door);
 }
 
@@ -292,7 +297,7 @@ static void door_tick(void)
             int i = (y << 8) + x;
             if (open) { if (g[i] == ID_PLANK) { g[i] = 0; v[i] = 0; mark(x, y); } }
             else if (g[i] == 0) { g[i] = ID_PLANK; mark(x, y); }
-            else if (g[i] != ID_PLANK) missing++;              /* a grain is still passing through */
+            else if (g[i] != ID_PLANK && !g[i + PW]) missing++;   /* a grain is still falling through (one resting on the floor is fine) */
         }
     }
     if (door.state == SAND_DOOR_CLOSING && door.r <= 0 && missing == 0) door.state = SAND_DOOR_CLOSED;
@@ -312,6 +317,16 @@ static void drain_sink(void)
             }
             g[i] = 0; v[i] = 0;
         }
+}
+
+int sand_land_row(int col, int from_row)
+{
+    if (col < 0 || col >= SD_W) return -1;
+    for (int y = (from_row < 0 ? 0 : from_row) + 2; y <= PLANK0; y++) {
+        const int i = (y << 8) + col + 1;
+        if (g[i] && (g[i] >= ID_STATIC || !v[i])) return y - 2;
+    }
+    return -1;
 }
 
 int sand_drained(int *hues, int *cols, int max)
@@ -387,40 +402,55 @@ void sand_step(void)
     for (int c = 0; c < CW * CHN; c++) if (act[c]) act[c]--;
     double dt = now_ms() - t0;
     st_sim_ms += dt; if (dt > st_sim_max) st_sim_max = dt; st_ticks++; st_cells += visited;
+    cpu_avg_ms += ((float)dt - cpu_avg_ms) * 0.05f;
 }
+
+float sand_cpu_ms(void) { return cpu_avg_ms; }
 
 /* ----------------------------------------------------------------- status */
 int   sand_count(void) { return n_sand; }
 float sand_fill(void) { return capacity > 0 ? (float)n_sand / (float)capacity : 0.0f; }
 int   sand_ceiling(void) { return ceil_count; }
 
-void sand_scan(int heights[SD_GROUPS], int *peak_x)
+void sand_scan(int heights[SD_GROUPS], int top_x[SD_GROUPS], int *peak_x)
 {
     const int gw = SD_W / SD_GROUPS;
     int best = -1, bx = SD_W / 2;
     for (int gi = 0; gi < SD_GROUPS; gi++) {
-        int h = 0;
-        for (int k = 0; k < 4; k++) {
-            const int x = gi * gw + 2 + k * (gw / 4);
+        int h = 0, hx = gi * gw + gw / 2;
+        for (int k = 0; k < 7; k++) {
+            const int x = gi * gw + 2 + k * (gw / 7);
             int n = 0;
             for (int y = PLANK0 - 1; y >= ROW_FIRST; y--) {      /* contiguous settled sand rising from the floor */
                 const int i = (y << 8) + x + 1;
                 if (!g[i] || g[i] >= ID_STATIC || v[i]) break;
                 n++;
             }
-            if (n > h) h = n;
+            if (n > h) { h = n; hx = x; }
             if (n > best) { best = n; bx = x; }
         }
-        heights[gi] = h;
+        heights[gi] = h; top_x[gi] = hx;
     }
     if (peak_x) *peak_x = bx;
-    int cnt = 0;
+    int cnt = 0;                                           /* settled sand under the ceiling, or piled into the funnel's neck */
     for (int y = ROW_FIRST; y < ROW_FIRST + 5; y++)
         for (int x = 1; x <= SD_W; x++) { const int i = (y << 8) + x; if (g[i] && g[i] < ID_STATIC && !v[i]) cnt++; }
+    for (int y = 30; y < 40; y++)
+        for (int x = SD_W / 2 - 3; x <= SD_W / 2 + 4; x++) { const int i = (y << 8) + x; if (g[i] && g[i] < ID_STATIC && !v[i]) cnt++; }
     ceil_count = cnt;
 }
 
 /* --------------------------------------------------------------- drawing */
+/* emboss: a grain whose up-left neighbour is empty catches the light, one whose down-right neighbour is empty is in
+   shade; empty cells just down-right of anything get a soft drop shadow; grains that are moving are drawn a touch brighter */
+static inline uint32_t cell_px(int i)
+{
+    const uint8_t c = g[i];
+    if (c == 0) return g[i - PW - 1] ? SHADOW_PX : 0;
+    if (c < ID_STATIC) return sand_lut[c][v[i] ? 3 : 1 + (g[i - PW - 1] == 0) - (g[i + PW + 1] == 0)];
+    return spx[(i >> 8) * SD_W - SD_W + (i & 255) - 1];
+}
+
 static void relight_chunk(int cx, int cy)
 {
     int x0 = cx * CHK, x1 = x0 + CHK - 1, y0 = cy * CHK, y1 = y0 + CHK - 1;
@@ -430,16 +460,37 @@ static void relight_chunk(int cx, int cy)
     if (y1 > SD_H) y1 = SD_H;
     for (int y = y0; y <= y1; y++) {
         uint32_t *out = &px[(y - 1) * SD_W];
-        const uint32_t *sp = &spx[(y - 1) * SD_W];
-        for (int x = x0; x <= x1; x++) {
+        for (int x = x0; x <= x1; x++) out[x - 1] = cell_px((y << 8) + x);
+    }
+}
+
+/* a few exposed grains twinkle slowly (about 1 Hz, never more than a handful at once) */
+static void glints(int *miny, int *maxy)
+{
+    glint_clock++;
+    if ((glint_clock & 7) == 0 && n_sand > 300) {
+        const int x = 1 + (int)(rnd() % (uint32_t)SD_W);
+        for (int y = ROW_FIRST; y < PLANK0; y++) {
             const int i = (y << 8) + x;
-            const uint8_t c = g[i];
-            uint32_t p;
-            if (c == 0) p = g[i - PW - 1] ? SHADOW_PX : 0;
-            else if (c < ID_STATIC) p = sand_lut[c][1 + (g[i - PW - 1] == 0) - (g[i + PW + 1] == 0)];
-            else p = sp[x - 1];
-            out[x - 1] = p;
+            if (!g[i]) continue;
+            if (g[i] < ID_STATIC && !v[i] && !g[i - PW]) {
+                for (int k = 0; k < MAX_GLINT; k++) if (glint[k].life <= 0) { glint[k].i = i; glint[k].life = GLINT_LIFE; break; }
+            }
+            break;
         }
+    }
+    for (int k = 0; k < MAX_GLINT; k++) {
+        if (glint[k].life <= 0) continue;
+        const int i = glint[k].i, y = (i >> 8), x = i & 255;
+        glint[k].life--;
+        uint32_t p = cell_px(i);
+        if (glint[k].life > 0 && g[i] && g[i] < ID_STATIC && !v[i]) {
+            float t = 1.0f - fabsf((float)glint[k].life - (float)GLINT_LIFE * 0.5f) / ((float)GLINT_LIFE * 0.5f);
+            p = pg_argb_lerp(p, 0xFFFFFFFFu, 0.9f * t);
+        } else glint[k].life = 0;
+        px[(y - 1) * SD_W + (x - 1)] = p;
+        if (y - 1 < *miny) *miny = y - 1;
+        if (y - 1 > *maxy) *maxy = y - 1;
     }
 }
 
@@ -459,11 +510,13 @@ void sand_draw(SDL_Renderer *r, int dx, int dy)
             if (a < miny) miny = a;
             if (b > maxy) maxy = b;
         }
+    glints(&miny, &maxy);
     if (maxy >= miny) {
         SDL_Rect rc = { 0, miny, SD_W, maxy - miny + 1 };
         SDL_UpdateTexture(tex, &rc, &px[miny * SD_W], SD_W * 4);
     }
     st_light_ms += now_ms() - t0; st_frames++;
+    cpu_avg_ms += ((float)(now_ms() - t0) - 0.0f) * 0.02f;
     SDL_FRect d = { (float)dx, (float)dy, (float)SD_PX_W, (float)SD_PX_H };
     SDL_RenderCopyF(r, tex, NULL, &d);
 }

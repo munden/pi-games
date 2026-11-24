@@ -64,7 +64,6 @@ static uint32_t  uid_ctr;
 static Debris    debris[MAX_DEBRIS];
 static uint32_t  stroke_serial;
 static int       color_rot;
-static int       total_alive;
 static PG_Mesh  *m_tube, *m_cap, *m_quad;
 static PG_Tex    t_tube, t_shadow;
 
@@ -87,7 +86,7 @@ static PG_Mesh *build_tube(int n)
     return mb_end(&b);
 }
 
-static PG_Tex paint_tube(void)
+static PG_Image *paint_tube(void)
 {
     /* barber-pole candy stripes on white: the finger colour is multiplied in, so stripes stay subtle */
     PG_Image *im = pg_img_new(32, 32, 0xFFFFFFFFu);
@@ -97,10 +96,11 @@ static PG_Tex paint_tube(void)
             im->px[j * 32 + i] = ph < 0.5f ? PG_RGB24(0xFFFFFF) : PG_RGB24(0xE4E4F2);
         }
     pg_img_noise(im, 3, 21);
-    return tex_finish(im, true);
+    pg_img_ps1(im);
+    return im;
 }
 
-static PG_Tex paint_shadow_disc(void)
+static PG_Image *paint_shadow_disc(void)
 {
     /* a soft bluish disc; overlapping stamps every 16 px blend into one even, soft band (no seams, no ribs) */
     PG_Image *im = pg_img_new(32, 32, 0);
@@ -111,7 +111,7 @@ static PG_Tex paint_shadow_disc(void)
             a = a * a * (3.0f - 2.0f * a);
             im->px[j * 32 + i] = PG_ARGB((uint32_t)(a * 255.0f), 34, 50, 124);
         }
-    return tex_finish(im, false);
+    return im;
 }
 
 void strokes_init(PG_World *w)
@@ -120,12 +120,16 @@ void strokes_init(PG_World *w)
     m_tube = build_tube(8);
     m_cap  = pg_mesh_sphere(1.0f, 7, 3);
     m_quad = pg_mesh_quad(1.0f, 1.0f);
-    t_tube = paint_tube();
-    t_shadow = paint_shadow_disc();
+    PG_Image *sheet = pg_img_new(64, 32, 0x00FFFFFFu), *part;                       /* candy stripes | soft shadow disc */
+    part = paint_tube();        img_blit(sheet, part, 0, 0);  pg_img_free(part);
+    part = paint_shadow_disc(); img_blit(sheet, part, 32, 0); pg_img_free(part);
+    PG_Tex all = tex_finish(sheet, false);
+    t_tube = tex_sub(all, 64, 32, 0, 0, 32, 32);
+    t_shadow = tex_sub(all, 64, 32, 32, 0, 32, 32);
     memset(pieces, 0, sizeof pieces);
     memset(pens, 0, sizeof pens);
     memset(debris, 0, sizeof debris);
-    q_head = q_tail = 0; total_alive = 0; alive_count = 0; uid_ctr = 0;
+    q_head = q_tail = 0; alive_count = 0; uid_ctr = 0;
     stroke_serial = 0; color_rot = 0;
 }
 
@@ -161,7 +165,6 @@ static void free_piece(Piece *p)
 {
     if (p->body) { pg_world_remove(world, p->body); p->body = NULL; }
     if (p->state == PS_ALIVE) alive_count--;
-    if (p->state != PS_FREE) total_alive--;
     p->state = PS_FREE;
 }
 
@@ -213,11 +216,12 @@ static Piece *add_piece(Pen *pen, float ax, float ay, float bx, float by)
     if (!body) return NULL;
     memset(p, 0, sizeof *p);
     body->friction = 0.12f; body->restitution = 0.5f; body->tag = TAG_STROKE; body->user = p;
-    p->body = body; p->state = PS_ALIVE; total_alive++; alive_count++;
+    p->body = body; p->state = PS_ALIVE; alive_count++;
     p->uid = ++uid_ctr; p->ttl = pen->ttl;
     p->ax = ax; p->ay = ay; p->bx = bx; p->by = by; p->len = len;
     p->dirx = dx / len; p->diry = dy / len;
-    p->z = pen->z; p->fade = 1.0f; p->age = -pen->stagger * (float)pen->pieces;
+    p->z = pen->z; p->fade = 1.0f;
+    p->age = pen->stagger > 0.0f ? -pen->stagger * (float)pen->pieces : 0.3f;   /* pens: the live tail already grew in, no pop; the first ramp pops in one by one */
     p->phase = (float)pen->pieces * 0.55f;
     p->color = pen->rainbow ? pg_hsv(pen->hue, 0.62f, 1.0f) : pen->color;
     p->stroke = pen->stroke;
@@ -231,7 +235,7 @@ static Piece *add_piece(Pen *pen, float ax, float ay, float bx, float by)
             q->has_next = true; q->next = (int)(p - pieces); q->next_uid = p->uid;
             float th = acosf(clampf(q->dirx * p->dirx + q->diry * p->diry, -1.0f, 1.0f));
             if (th < SPH_ANGLE) {                           /* smooth bend: mitre the two tubes, no sphere needed */
-                float e = STROKE_R * tanf(th * 0.5f);
+                float e = fmaxf(STROKE_R * tanf(th * 0.5f), 1.8f);        /* always overlap a little: no cracks between tubes */
                 q->ext_b = e; p->ext_a = e; q->sph_b = false;
                 piece_place(q);
             }
@@ -256,7 +260,6 @@ int strokes_next_color(void)
 
 void strokes_pen_set_ttl(int pen, float seconds) { if (pen >= 0 && pen < MAX_PENS) pens[pen].ttl = seconds; }
 bool strokes_pen_active(int pen) { return pen >= 0 && pen < MAX_PENS && pens[pen].active; }
-int  strokes_pen_color(int pen)  { return (pen >= 0 && pen < MAX_PENS && pens[pen].active && !pens[pen].rainbow) ? pens[pen].color_idx : -1; }
 
 static float clamp_x(float x) { return clampf(x, -WALL_IN_X + STROKE_R + 3.0f, WALL_IN_X - STROKE_R - 3.0f); }
 static float clamp_y(float y) { return clampf(y, -262.0f, 300.0f); }
@@ -310,8 +313,8 @@ void strokes_pen_move(int idx, float x, float y)
     if (idx < 0 || idx >= MAX_PENS || !pens[idx].active) return;
     Pen *pen = &pens[idx];
     x = clamp_x(x); y = clamp_y(y);
-    pen->tx = lerpf(pen->tx, x, 0.65f);                  /* light smoothing: kills sensor jitter, costs ~1 tick of lag */
-    pen->ty = lerpf(pen->ty, y, 0.65f);
+    pen->tx = lerpf(pen->tx, x, 0.85f);                  /* light smoothing: kills sensor jitter, costs well under 1 tick of lag */
+    pen->ty = lerpf(pen->ty, y, 0.85f);
     pen_walk(pen, 4);
 }
 
@@ -397,14 +400,6 @@ bool strokes_contact(PG_Body *seg)
 }
 
 int strokes_count(void) { return alive_count; }
-int strokes_total(void) { return total_alive; }
-
-int strokes_spheres(void)
-{
-    int n = 0;
-    for (int i = 0; i < POOL; i++) if (pieces[i].state != PS_FREE) n += pieces[i].sph_a + pieces[i].sph_b;
-    return n;
-}
 
 void strokes_update(float degrade)
 {
@@ -455,13 +450,6 @@ void strokes_render_shadows(void)
             pg3d_mesh(m_quad, t_shadow, &m, pg_rgba(255, 255, 255, a), fl);
         }
     }
-    for (int i = 0; i < MAX_DEBRIS; i++) {
-        const Debris *d = &debris[i];
-        if (d->life <= 0.0f) continue;
-        float k = smooth01(d->life / 0.5f);
-        PG_M4 m = place(d->x + SH_DX * 1.4f, d->y + SH_DY * 1.4f, BACK_Z + 1.0f, 1, 0, 24.0f * k, 24.0f * k, 1);
-        pg3d_mesh(m_quad, t_shadow, &m, pg_rgba(255, 255, 255, (uint8_t)(70.0f * k)), fl);
-    }
 }
 
 void strokes_render(void)
@@ -503,6 +491,28 @@ void strokes_render(void)
         PG_Color c = d->color; c.a = (uint8_t)(255.0f * k);
         pg3d_mesh(m_tube, t_tube, &m, c, 0);
     }
+    /* the live tail: from the last laid piece to the finger, so the line is always attached to the fingertip even though
+     * the next physical piece only appears every STROKE_STEP px */
+    for (int i = 0; i < MAX_PENS; i++) {
+        const Pen *pen = &pens[i];
+        if (!pen->active || pen->quiet) continue;
+        float dx = pen->tx - pen->lx, dy = pen->ty - pen->ly, d = sqrtf(dx * dx + dy * dy);
+        if (d < 2.5f) continue;
+        float ox = dx / d, oy = dy / d;
+        if (ox < 0.0f) { ox = -ox; oy = -oy; }
+        PG_Color c = pen->rainbow ? pg_hsv(pen->hue, 0.62f, 1.0f) : pen->color;
+        PG_V3 q = at_depth((pen->lx + pen->tx) * 0.5f, (pen->ly + pen->ty) * 0.5f, pen->z);
+        PG_M4 m = place(q.x, q.y, q.z, ox, oy, d * 0.5f + 1.5f, STROKE_R, STROKE_R);
+        pg3d_mesh(m_tube, t_tube, &m, c, 0);
+        q = at_depth(pen->tx, pen->ty, pen->z);
+        m = place(q.x, q.y, q.z, 1.0f, 0.0f, STROKE_R, STROKE_R, STROKE_R);
+        pg3d_mesh(m_cap, t_tube, &m, c, 0);
+        if (pen->last_piece < 0) {
+            q = at_depth(pen->lx, pen->ly, pen->z);
+            m = place(q.x, q.y, q.z, 1.0f, 0.0f, STROKE_R, STROKE_R, STROKE_R);
+            pg3d_mesh(m_cap, t_tube, &m, c, 0);
+        }
+    }
     /* a soft light under every finger that is drawing: instant feedback even before the first piece exists */
     PG_Tex glow = pg3d_builtin(PG3D_TEX_GLOW);
     for (int i = 0; i < MAX_PENS; i++) {
@@ -510,7 +520,7 @@ void strokes_render(void)
         if (!pen->active || pen->quiet) continue;
         PG_Color c = pen->rainbow ? pg_hsv(t * 120.0f, 0.55f, 1.0f) : pen->color;
         PG_V3 pos = at_depth(pen->tx, pen->ty, 46.0f);
-        pg3d_sprite(glow, pos, 110.0f, 110.0f, 0, pg_alpha(c, 0.5f), PG3D_ADDITIVE);
-        if (!pen->rainbow) pg3d_sprite(glow, pos, 40.0f, 40.0f, 0, pg_rgba(255, 255, 255, 130), PG3D_ADDITIVE);
+        pg3d_sprite(glow, pos, 120.0f, 120.0f, 0, pg_alpha(c, 0.7f), PG3D_ADDITIVE);
+        if (!pen->rainbow) pg3d_sprite(glow, pos, 34.0f, 34.0f, 0, pg_rgba(255, 255, 255, 110), PG3D_ADDITIVE);
     }
 }

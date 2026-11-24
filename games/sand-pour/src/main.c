@@ -34,7 +34,6 @@ static int   idle_ticks, door_prev, cooldown_auto, ceil_ticks, scan_n, shh_t;
 static float hint_a, ghost_t, ghost_hue, funnel_hue, hue_counter, ghost_px, ghost_py;
 static int   rec_band[SD_GROUPS];
 static int   chime_last = -100, peak_x = SD_W / 2, peak_h;
-static bool  ghost_has;
 static float perf_scale = 1.0f;
 
 /* ------------------------------------------------------------------- helpers */
@@ -65,11 +64,12 @@ static bool in_win(float x, float y) { return x >= (float)win_rx && x < (float)(
 static bool in_gate(float x, float y) { return y < 100.0f && (x < 100.0f || x > (float)PG_W - 100.0f); }   /* the parent's exit corners: never used */
 static bool hit_button(float x, float y) { float dx = x - btn_sx, dy = y - btn_sy, r = btn_r + 14.0f; return dx * dx + dy * dy <= r * r; }
 
-static void chime(int step, float vol)
+static bool chime(int step, float vol)             /* at most one every 16 ticks, so piles growing everywhere stay calm */
 {
-    if ((int)pg_ticks() - chime_last < 6) return;
+    if ((int)pg_ticks() - chime_last < 16) return false;
     chime_last = (int)pg_ticks();
     pg_sfx_chime(step, vol);
+    return true;
 }
 
 /* ---------------------------------------------------------------------- init */
@@ -112,7 +112,7 @@ static void poke_toy(int k, float x, float y)
     if (pg3d_plane_z(x, y, 70, &p)) fx_burst(p, (float)(k * 47), 10, 190.0f);
     switch (k) {
     case P_SUN:    pg_sfx_sparkle(0.45f); break;
-    case P_PALM:   pg_sfx_chime(3, 0.4f); pg_sfx_chime(5, 0.3f); break;
+    case P_PALM:   pg_sfx_chime(5, 0.45f); break;
     case P_BALL:   pg_sfx_boing(0.5f, 1.1f); break;
     case P_BUCKET: pg_sfx_tap(0.6f); pg_sfx_chime(1, 0.3f); break;
     default:       pg_sfx_chime(4 + k - P_F0, 0.5f); break;
@@ -123,7 +123,7 @@ static void touches(void)
 {
     const PG_Touch *t = pg_touches();
     int pouring = 0;
-    const int n = (int)(8.0f * perf_scale + 0.5f);
+    const int n = (int)(6.0f * perf_scale + 0.5f);
     for (int i = 0; i < PG_MAX_TOUCH; i++) {
         Finger *f = &fing[i];
         if (t[i].state == PG_TOUCH_NONE) { f->on = f->btn = f->has_last = false; continue; }
@@ -134,10 +134,10 @@ static void touches(void)
             f->has_last = false;
             f->btn = hit_button(x, y);
             f->on = !f->btn;
+            f->hue = fmodf(hue_counter, 360.0f);
+            hue_counter = fmodf(hue_counter + 137.5f + pg_rand_range(-12, 12), 360.0f);
             if (f->btn) press_button();
             else {
-                f->hue = fmodf(hue_counter, 360.0f);
-                hue_counter += 137.5f + pg_rand_range(-12, 12);
                 PG_V3 p;
                 if (pg3d_plane_z(x, y, 70, &p)) fx_burst(p, f->hue, 5, 130.0f);
                 if (in_win(x, y) && !in_gate(x, y)) pg_sfx_chime(hue_index(f->hue) % 5 + 3, 0.35f);
@@ -160,8 +160,13 @@ static void touches(void)
             if (!f->has_last) { f->lx = cx; f->ly = cy; f->has_last = true; }
             float seg = fabsf(cx - f->lx) + fabsf(cy - f->ly);
             sand_pour(f->lx, f->ly, cx, cy, hue_index(f->hue), n + (int)clampf(seg * 0.5f, 0, 6));
+            if ((t[i].ticks % 5) == 2) {                          /* a soft puff of dust where the stream lands */
+                int row = sand_land_row((int)cx, (int)cy);
+                if (row >= 0) fx_add(1, pg_v3(WX0 + (floorf(cx) + 0.5f) * (float)SD_CELL, WYT - ((float)row + 0.5f) * (float)SD_CELL + 3.0f, 40.0f),
+                                     pg_v3(pg_rand_range(-10, 10), pg_rand_range(8, 24), 0), 0.5f, f->hue, 20.0f);
+            }
             f->lx = cx; f->ly = cy;
-            f->hue += 0.5f;
+            f->hue = fmodf(f->hue + 0.5f, 360.0f);
         } else {
             f->has_last = false;
             if (t[i].state == PG_TOUCH_HELD && (t[i].ticks % 9) == 0) {
@@ -178,23 +183,22 @@ static void touches(void)
 static void idle_show(void)
 {
     /* the funnel at the top of the box trickles rainbow sand by itself */
-    funnel_hue += 0.8f;
-    if (sand_fill() < 0.9f) sand_pour((float)SD_W * 0.5f - 9.0f, 6.0f, (float)SD_W * 0.5f + 9.0f, 9.0f, hue_index(funnel_hue), (pg_ticks() % 3 == 0) ? 2 : 3);
+    funnel_hue = fmodf(funnel_hue + 0.8f, 360.0f);
+    if (sand_fill() < 0.9f) sand_pour((float)SD_W * 0.5f - 9.0f, 6.0f, (float)SD_W * 0.5f + 9.0f, 9.0f, hue_index(funnel_hue), (pg_ticks() % 3 == 0) ? 1 : 2);
 
     /* after a short while without touches a ghost hand shows how to pour */
     idle_ticks++;
     float target = idle_ticks > 130 ? 1.0f : 0.0f;
     hint_a += (target - hint_a) * (target > hint_a ? 0.05f : 0.2f);
     if (hint_a > 0.02f) {
-        ghost_t += PG_DT;
+        ghost_t = fmodf(ghost_t + PG_DT, 1000.0f);
         const float gx = (float)SD_W * 0.5f + 84.0f * sinf(ghost_t * 0.7f), gy = 20.0f + 5.0f * sinf(ghost_t * 1.6f);
         ghost_px = (float)win_rx + gx * (float)SD_CELL; ghost_py = (float)win_ry + gy * (float)SD_CELL - 12.0f;
         if (hint_a > 0.6f) {
-            ghost_hue += 0.6f;
-            if (!ghost_has) { ghost_has = true; }
+            ghost_hue = fmodf(ghost_hue + 0.6f, 360.0f);
             sand_pour(gx - 1.0f, gy, gx, gy, hue_index(ghost_hue), 3);
         }
-    } else ghost_has = false;
+    }
 }
 
 static void door_logic(void)
@@ -206,9 +210,9 @@ static void door_logic(void)
         else {
             float fill = sand_fill();
             /* the box is nearly full, or a pile has grown up to the ceiling / the funnel: let it sink slowly through a small hole */
-            if (fill > 0.84f || ceil_ticks > 100 || peak_h >= 82) {
+            if (fill > 0.84f || ceil_ticks > 100 || peak_h >= 74) {
                 float close_at = fill > 0.84f ? 0.55f : fmaxf(0.04f, fill - 0.12f);
-                sand_door_open((float)peak_x + 0.5f, 3.0f, 0.12f, 150, close_at);
+                sand_door_open((float)peak_x + 0.5f, fill > 0.92f ? 12.0f : 3.0f, 0.12f, 150, close_at);
                 pg_sfx_whoosh(0.22f);
                 cooldown_auto = 600;
             }
@@ -222,15 +226,17 @@ static void door_logic(void)
 
 static void scan_piles(void)
 {
-    int h[SD_GROUPS];
-    sand_scan(h, &peak_x);
+    int h[SD_GROUPS], hx[SD_GROUPS];
+    sand_scan(h, hx, &peak_x);
     peak_h = 0;
     for (int g = 0; g < SD_GROUPS; g++) if (h[g] > peak_h) peak_h = h[g];
     ceil_ticks = sand_ceiling() > 14 ? ceil_ticks + 6 : 0;
     for (int g = 0; g < SD_GROUPS; g++) {
         int band = h[g] / 10;
         if (band > rec_band[g]) {
-            chime(band - 1 > 9 ? 9 : band - 1, 0.45f);
+            if (chime(band - 1 > 9 ? 9 : band - 1, 0.45f))   /* ...and a little shower of stars at the top of the pile that just grew */
+                fx_burst(pg_v3(WX0 + ((float)hx[g] + 0.5f) * (float)SD_CELL, WYT - ((float)(SD_H - SD_PLANK - 1 - h[g]) + 0.5f) * (float)SD_CELL + 6.0f, 62.0f),
+                         (float)band * 38.0f, 6, 120.0f);
             rec_band[g] = band;
         } else if (band < rec_band[g] - 1) rec_band[g] = band;
     }
@@ -255,7 +261,8 @@ static void update(void)
     sway_y = 5.0f * sinf(tm * 0.19f + 0.6f);
     win_rx = (int)floorf(WIN_X - sway_x + 0.5f);
     win_ry = (int)floorf(WIN_Y + sway_y + 0.5f);
-    perf_scale = pg_frame_ms() > 12.0f ? 0.5f : 1.0f;
+    /* ease off if the device is struggling and the sand is a real part of the cost (headless software rendering is not) */
+    perf_scale = (pg_frame_ms() > 12.0f && sand_cpu_ms() > 2.0f) ? 0.5f : 1.0f;
 
     touches();
     idle_show();
@@ -289,8 +296,8 @@ static void draw_sky_props(float tm)
     float pxs, pys, dd;
     if (pg3d_project(sp, &pxs, &pys, &dd)) { pokes[P_SUN].sx = pxs; pokes[P_SUN].sy = pys; pokes[P_SUN].r = 56; }
 
-    pg3d_sprite(A.cloud[0], P3(150.0f + 16.0f * sinf(tm * 0.2f), 58, -480), WS(104, -480), WS(52, -480), 0, WHITE, PG3D_BG | PG3D_NOFOG);
-    pg3d_sprite(A.cloud[1], P3(44.0f + 12.0f * sinf(tm * 0.17f + 1.0f), 214, -470), WS(84, -470), WS(42, -470), 0, pg_rgba(255, 255, 255, 235), PG3D_BG | PG3D_NOFOG);
+    pg3d_sprite(A.cloud, P3(150.0f + 16.0f * sinf(tm * 0.2f), 58, -480), WS(104, -480), WS(52, -480), 0, WHITE, PG3D_BG | PG3D_NOFOG);
+    pg3d_sprite(A.cloud, P3(44.0f + 12.0f * sinf(tm * 0.17f + 1.0f), 214, -470), WS(84, -470), WS(42, -470), 0, pg_rgba(255, 255, 255, 235), PG3D_BG | PG3D_NOFOG);
 }
 
 static void draw_palm(float tm)
@@ -322,7 +329,7 @@ static void draw_palm(float tm)
         }
     for (int i = 0; i < 3; i++) {
         m = pg_m4_translate(c.x + (float)(i - 1) * 9.0f, c.y - 10.0f - (float)(i & 1) * 4.0f + 2.0f * shake, c.z + 6.0f);
-        pg3d_mesh(A.coconut_m, A.coconut, &m, WHITE, PG3D_BG);
+        pg3d_mesh(A.coconut_m, A.trunk, &m, pg_rgb(210, 170, 130), PG3D_BG);
     }
     float sx, sy, d;
     if (pg3d_project(c, &sx, &sy, &d)) { pokes[P_PALM].sx = sx; pokes[P_PALM].sy = sy; pokes[P_PALM].r = 74; }
@@ -373,6 +380,9 @@ static void draw_frame(void)
     m = pg_m4_translate(WX0 - BAR_T * 0.5f, WYB - BAR_B * 0.5f, zc);   pg3d_mesh(A.post_b, A.post, &m, pg_hex(0x3C8DF0), 0);
     m = pg_m4_translate(WX1 + BAR_T * 0.5f, WYB - BAR_B * 0.5f, zc);   pg3d_mesh(A.post_b, A.post, &m, pg_hex(0x4CC95A), 0);
 
+    m = pg_m4_translate(cx, WYB - BAR_B * 0.5f - 1.0f, ZF + 0.4f);
+    pg3d_mesh(A.trim, pg3d_white(), &m, WHITE, PG3D_UNLIT);
+
     /* the slot in the base where the sand disappears: as wide as the open trapdoor */
     const float r = sand_door_radius();
     if (r > 0.3f) {
@@ -380,7 +390,7 @@ static void draw_frame(void)
         float xs = WX0 + sand_door_center() * (float)SD_CELL;
         float x0 = fmaxf(WX0, xs - w), x1 = fminf(WX1, xs + w);
         m = pg_m4_mul(pg_m4_translate((x0 + x1) * 0.5f, WYB + 0.8f, 27.0f), pg_m4_mul(pg_m4_rot_x(-PG_PI * 0.5f), pg_m4_scale((x1 - x0) * 0.5f, 23.0f, 1.0f)));
-        pg3d_mesh(A.slot_m, A.slot, &m, WHITE, PG3D_UNLIT | PG3D_TWOSIDED);
+        pg3d_mesh(A.slot_m, A.post, &m, pg_hex(0x4A2E58), PG3D_UNLIT | PG3D_TWOSIDED);
     }
 }
 
@@ -425,11 +435,11 @@ static void draw_decor(float tm)
         m = pg_m4_mul(pg_m4_translate(p.x, GROUND_Y + 24.0f, p.z), pg_m4_rot_z(wob));
         pg3d_mesh(A.bucket_m, A.bucket, &m, WHITE, 0);
         m = pg_m4_mul(pg_m4_translate(p.x, GROUND_Y + 48.0f, p.z), pg_m4_mul(pg_m4_rot_z(wob), pg_m4_translate(0, 0, 0)));
-        pg3d_mesh(A.bucket_cap, A.sandcap, &m, WHITE, 0);
+        pg3d_mesh(A.bucket_cap, A.ground, &m, WHITE, 0);
         m = pg_m4_mul(pg_m4_translate(p.x + 52.0f, GROUND_Y + 28.0f, p.z - 6.0f), pg_m4_rot_z(-0.42f));
         pg3d_mesh(A.spade_h, A.wood_v, &m, WHITE, 0);
         m = pg_m4_mul(pg_m4_translate(p.x + 52.0f + sinf(0.42f) * 40.0f, GROUND_Y + 28.0f - cosf(0.42f) * 40.0f, p.z - 6.0f), pg_m4_rot_z(-0.42f));
-        pg3d_mesh(A.spade_b, A.spade, &m, WHITE, 0);
+        pg3d_mesh(A.spade_b, A.btnbase, &m, pg_rgb(255, 150, 140), 0);
         pg3d_blob_shadow(p.x + 20.0f, GROUND_Y + 0.7f, p.z, 62.0f, 0.45f);
         float sx, sy, d;
         if (pg3d_project(pg_v3(p.x, GROUND_Y + 24.0f, p.z), &sx, &sy, &d)) { pokes[P_BUCKET].sx = sx; pokes[P_BUCKET].sy = sy; pokes[P_BUCKET].r = 44; }
@@ -437,6 +447,7 @@ static void draw_decor(float tm)
     /* three flowers */
     for (int i = 0; i < 3; i++) {
         static const float fx_[3] = { 590, 636, 684 }, fy_[3] = { 520, 527, 518 }, hgt[3] = { 1.0f, 1.25f, 0.9f };
+        static const PG_Color petal_col[3] = { { 255, 140, 185, 255 }, { 255, 255, 255, 255 }, { 255, 170, 70, 255 } };
         PG_V3 p = P3(fx_[i], fy_[i], 150.0f);
         float pk = pokes[P_F0 + i].t, sw = 0.10f * sinf(tm * 1.7f + (float)i * 2.0f) + 0.5f * pk * sinf(pk * 20.0f);
         float h = 40.0f * hgt[i];
@@ -444,7 +455,7 @@ static void draw_decor(float tm)
         pg3d_mesh(A.stem_m, A.stem, &m, WHITE, 0);
         PG_V3 head = pg_v3(p.x - sinf(sw) * h, GROUND_Y + cosf(sw) * h, p.z + 4.0f);
         float sz = 34.0f * (1.0f + 0.3f * pk);
-        pg3d_sprite(A.flower[i], head, sz, sz, tm * 0.4f * (float)(i - 1) + pk * 4.0f, WHITE, 0);
+        pg3d_sprite(A.flower, head, sz, sz, tm * 0.4f * (float)(i - 1) + pk * 4.0f, petal_col[i], 0);
         pg3d_blob_shadow(p.x + 4.0f, GROUND_Y + 0.7f, p.z, 16.0f, 0.4f);
         float sx, sy, d;
         if (pg3d_project(head, &sx, &sy, &d)) { pokes[P_F0 + i].sx = sx; pokes[P_F0 + i].sy = sy; pokes[P_F0 + i].r = 30; }

@@ -25,7 +25,7 @@ static PG_Mesh *m_tile, *m_wall[2], *m_hilltop[2], *m_hillfront[2];
 static PG_Mesh *m_trunk, *m_cone, *m_lolli;
 static PG_Tex   t_mural[6], t_quilt, t_hilltop, t_hillfront, t_cloudspr, t_sunrays, t_sunface;
 static PG_Tex   t_tree_cone, t_tree_trunk, t_tree_lolli, t_flower[3];
-static int      wall_id[2] = { 0, 1 };
+static int      wall_id[3] = { 0, 1, 2 };            /* 2 = the ceiling: no cushion to bulge */
 static float    wall_bulge[2], t_now;
 
 /* ------------------------------------------------------------------ helpers */
@@ -112,18 +112,19 @@ static void paint_quilt(void)
         for (int i = 0; i < 64; i++) {
             int u = ((i + j + 32) & 63) - 32, v = ((i - j + 32) & 63) - 32;         /* signed distances to the seam lines */
             float d = (float)(abs(u) > abs(v) ? abs(u) : abs(v)) / 32.0f;            /* 0 at a diamond centre, 1 at its seam */
-            float puff = 1.0f - d * d;                                               /* lit hump in the middle of every diamond */
-            int r = 232 + (int)(23.0f * puff), g = 206 + (int)(44.0f * puff), b = 220 + (int)(32.0f * puff);
+            float puff = 1.0f - d * sqrtf(d);                                        /* a lit hump in the middle of every diamond */
+            int r = 220 + (int)(35.0f * puff), g = 178 + (int)(68.0f * puff), b = 204 + (int)(46.0f * puff);
             im->px[j * 64 + i] = PG_RGB24(((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b);
         }
     for (int k = -2; k <= 4; k++) {
-        pg_img_line(im, (float)(32 * k), 0, (float)(32 * k + 64), 64, 2.2f, PG_RGB24(0xD79AB4));
-        pg_img_line(im, (float)(32 * k), 64, (float)(32 * k + 64), 0, 2.2f, PG_RGB24(0xD79AB4));
+        pg_img_line(im, (float)(32 * k), 0, (float)(32 * k + 64), 64, 3.0f, PG_ARGB(120, 176, 96, 138));
+        pg_img_line(im, (float)(32 * k), 64, (float)(32 * k + 64), 0, 3.0f, PG_ARGB(120, 176, 96, 138));
     }
-    static const int bx[8] = { 32, 0, 64, 32, 0, 64, 32, 32 }, by[8] = { 0, 32, 32, 64, 0, 64, 0, 64 };
+    static const int bx[6] = { 32, 0, 64, 32, 0, 64 }, by[6] = { 0, 32, 32, 64, 0, 64 };
     for (int k = 0; k < 6; k++) {
-        pg_img_disc(im, (float)bx[k], (float)by[k], 4.2f, PG_RGB24(0xE0709C));
-        pg_img_disc(im, (float)bx[k] - 1.0f, (float)by[k] - 1.0f, 1.8f, PG_RGB24(0xFFC4DA));
+        pg_img_disc(im, (float)bx[k] + 0.7f, (float)by[k] + 0.9f, 5.2f, PG_ARGB(120, 120, 50, 90));
+        pg_img_disc(im, (float)bx[k], (float)by[k], 4.8f, PG_RGB24(0xE2689A));
+        pg_img_disc(im, (float)bx[k] - 1.3f, (float)by[k] - 1.4f, 2.0f, PG_RGB24(0xFFC8DE));
     }
     pg_img_noise(im, 3, 12);
     t_quilt = tex_finish(im, true);
@@ -131,6 +132,7 @@ static void paint_quilt(void)
 
 static void paint_hill(void)
 {
+    PG_Image *sheet = pg_img_new(96, 64, 0x00FFFFFFu);                      /* grass top (64x64) and hill front (32x64) */
     PG_Image *im = pg_img_new(64, 64, PG_RGB24(0xA0DE50));
     for (int j = 0; j < 64; j += 16) pg_img_rect(im, 0, j, 64, 8, PG_ARGB(70, 214, 250, 110));
     for (int k = 0; k < 9; k++) {
@@ -138,7 +140,8 @@ static void paint_hill(void)
         pg_img_disc(im, rnd() * 64.0f, rnd() * 64.0f, 1.4f, PG_RGB24(fc[k % 3]));
     }
     pg_img_noise(im, 6, 5);
-    t_hilltop = tex_finish(im, true);
+    img_blit(sheet, im, 0, 0);
+    pg_img_free(im);
 
     im = pg_img_new(32, 64, PG_RGB24(0x5CC262));
     pg_img_gradient_v(im, 0, 0, 32, 64, PG_RGB24(0x6CD268), PG_RGB24(0x2E9C78));
@@ -158,18 +161,24 @@ static void paint_hill(void)
         pg_img_disc(im, cx, cy, 1.3f, PG_RGB24(0xFFD84A));
     }
     pg_img_noise(im, 4, 6);
-    t_hillfront = tex_finish(im, true);
+    img_blit(sheet, im, 64, 0);
+    pg_img_free(im);
+    PG_Tex all = tex_finish(sheet, true);
+    t_hilltop = tex_sub(all, 96, 64, 0, 0, 64, 64);
+    t_hillfront = tex_sub(all, 96, 64, 64, 0, 32, 64);
 }
 
 static void paint_sky_sprites(void)
 {
+    PG_Image *sheet = pg_img_new(128, 128, 0x00FFFFFFu);                     /* drifting cloud (128x64) over smiling sun (64x64) */
     PG_Image *im = pg_img_new(128, 64, 0x00FFFFFFu);                         /* drifting cloud */
     pg_img_disc(im, 34, 40, 15, 0xFFFFFFFFu); pg_img_disc(im, 56, 32, 20, 0xFFFFFFFFu);
     pg_img_disc(im, 84, 34, 19, 0xFFFFFFFFu); pg_img_disc(im, 104, 42, 14, 0xFFFFFFFFu);
     pg_img_disc(im, 70, 44, 18, 0xFFFFFFFFu);
     pg_img_rect(im, 22, 44, 92, 9, 0xFFFFFFFFu);
     pg_img_rect(im, 24, 50, 88, 4, PG_ARGB(110, 196, 220, 255));
-    t_cloudspr = tex_finish(im, true);
+    img_blit(sheet, im, 0, 0);
+    pg_img_free(im);
 
     im = pg_img_new(128, 128, 0x00FFFFFFu);                                  /* sun rays */
     pg_img_star(im, 64, 64, 62, 40, 12, 0.0f, PG_ARGB(255, 255, 214, 84));
@@ -184,24 +193,38 @@ static void paint_sky_sprites(void)
         float t0 = (float)k / 8.0f, t1 = (float)(k + 1) / 8.0f;
         pg_img_line(im, 22.0f + 20.0f * t0, 39.0f + 8.0f * 4.0f * t0 * (1.0f - t0), 22.0f + 20.0f * t1, 39.0f + 8.0f * 4.0f * t1 * (1.0f - t1), 2.6f, PG_RGB24(0x8A3A20));
     }
-    t_sunface = tex_finish(im, true);
+    img_blit(sheet, im, 0, 64);
+    pg_img_free(im);
+    PG_Tex all = tex_finish(sheet, true);
+    t_cloudspr = tex_sub(all, 128, 128, 0, 0, 128, 64);
+    t_sunface = tex_sub(all, 128, 128, 0, 64, 64, 64);
 }
 
 static void paint_trees(void)
 {
+    PG_Image *sheet = pg_img_new(96, 64, 0x00FFFFFFu);                       /* cone | apple | trunk on the top row, flowers below */
     PG_Image *im = pg_img_new(32, 32, PG_RGB24(0x3FB06A));
     pg_img_stripes(im, 5, 6, PG_RGB24(0x3FB06A), PG_RGB24(0x5CCB78));
     pg_img_noise(im, 5, 3);
-    t_tree_cone = tex_finish(im, true);
+    img_blit(sheet, im, 0, 0);
+    pg_img_free(im);
 
     im = pg_img_new(16, 16, PG_RGB24(0xA8744A));
     pg_img_stripes(im, 3, 0, PG_RGB24(0xA8744A), PG_RGB24(0x8C5A38));
-    t_tree_trunk = tex_finish(im, true);
+    img_blit(sheet, im, 64, 0);
+    pg_img_free(im);
 
-    im = pg_img_new(32, 32, PG_RGB24(0xFF7AA8));
-    for (int j = 0; j < 3; j++) for (int i = 0; i < 4; i++) pg_img_disc(im, 4.0f + (float)(i * 9) + ((j & 1) ? 4.5f : 0.0f), 5.0f + (float)(j * 11), 2.6f, PG_RGB24(0xFFF0F6));
+    im = pg_img_new(32, 32, PG_RGB24(0x58BE62));                             /* leafy apple tree */
+    for (int k = 0; k < 10; k++) pg_img_disc(im, rnd() * 32.0f, rnd() * 32.0f, 3.0f + rnd() * 4.0f, PG_ARGB(110, 40, 140, 76));
+    for (int k = 0; k < 10; k++) pg_img_disc(im, rnd() * 32.0f, rnd() * 32.0f, 2.0f + rnd() * 3.0f, PG_ARGB(120, 150, 226, 110));
+    for (int k = 0; k < 5; k++) {
+        float x = 3.0f + rnd() * 26.0f, y = 5.0f + rnd() * 22.0f;
+        pg_img_disc(im, x, y, 2.6f, PG_RGB24(0xF2444E));
+        pg_img_disc(im, x - 0.7f, y - 0.8f, 0.9f, PG_RGB24(0xFFC0C0));
+    }
     pg_img_noise(im, 5, 8);
-    t_tree_lolli = tex_finish(im, true);
+    img_blit(sheet, im, 32, 0);
+    pg_img_free(im);
 
     im = pg_img_new(48, 24, 0x00FFFFFFu);                                    /* three little flowers */
     static const uint32_t pet[3] = { 0xFF7AA8, 0xFFFFFF, 0xFFB03C };
@@ -214,8 +237,13 @@ static void paint_trees(void)
         }
         pg_img_disc(im, cx, 7.0f, 2.4f, PG_RGB24(f == 2 ? 0xFFFFFF : 0xFFE04A));
     }
-    PG_Tex sheet = tex_finish(im, true);
-    for (int f = 0; f < 3; f++) t_flower[f] = tex_sub(sheet, 48, 24, f * 16, 0, 16, 24);
+    img_blit(sheet, im, 0, 32);
+    pg_img_free(im);
+    PG_Tex all = tex_finish(sheet, true);
+    t_tree_cone = tex_sub(all, 96, 64, 0, 0, 32, 32);
+    t_tree_lolli = tex_sub(all, 96, 64, 32, 0, 32, 32);
+    t_tree_trunk = tex_sub(all, 96, 64, 64, 0, 16, 16);
+    for (int f = 0; f < 3; f++) t_flower[f] = tex_sub(all, 96, 64, f * 16, 32, 16, 24);
 }
 
 /* ------------------------------------------------------------------- meshes */
@@ -326,7 +354,7 @@ void scene_physics(PG_World *w)
         b->friction = 0.05f; b->tag = TAG_WALL; b->user = &wall_id[side];
     }
     PG_Body *c = pg_world_add_segment(w, -560.0f, CEIL_Y + WALL_T, 560.0f, CEIL_Y + WALL_T, WALL_T);
-    if (c) { c->friction = 0.05f; c->tag = TAG_WALL; c->user = &wall_id[0]; }
+    if (c) { c->friction = 0.05f; c->tag = TAG_WALL; c->user = &wall_id[2]; }
     PG_Body *f = pg_world_add_segment(w, -560.0f, -420.0f, 560.0f, -420.0f, WALL_T);      /* far below the screen: a safety net */
     if (f) { f->friction = 0.3f; f->tag = TAG_HILL; }
 }
@@ -395,14 +423,14 @@ static void tree_cone(float x, float z, float s, float ph)
     }
 }
 
-static void tree_lolli(float x, float z, float s, float ph)
+static void tree_round(float x, float z, float s, float ph)
 {
     float y = hill_surface(x < 0 ? 0 : 1, x);
-    float sway = sinf(t_now * 0.9f + ph) * 0.04f;
+    float sway = sinf(t_now * 0.9f + ph) * 0.035f;
     PG_M4 base = pg_m4_mul(pg_m4_translate(x, y, z), pg_m4_mul(pg_m4_rot_z(sway), pg_m4_scale(s, s, s)));
-    PG_M4 m = pg_m4_mul(base, pg_m4_trs2(0, 22, 0, 0, 4.5f, 22.0f, 4.5f));
+    PG_M4 m = pg_m4_mul(base, pg_m4_trs2(0, 28, 0, 0, 6.0f, 28.0f, 6.0f));
     pg3d_mesh(m_trunk, t_tree_trunk, &m, pg_rgb(255, 255, 255), 0);
-    m = pg_m4_mul(base, pg_m4_trs2(0, 62, 0, 0, 30.0f, 30.0f, 30.0f));
+    m = pg_m4_mul(base, pg_m4_trs2(0, 82, 0, 0, 36.0f, 31.0f, 36.0f));
     pg3d_mesh(m_lolli, t_tree_lolli, &m, pg_rgb(255, 255, 255), 0);
 }
 
@@ -414,8 +442,8 @@ void scene_render_front(void)
         pg3d_mesh(m_hillfront[s], t_hillfront, &id, pg_rgb(255, 255, 255), 0);
     }
     tree_cone(-412.0f, -62.0f, 0.92f, 0.0f);
-    tree_lolli(-296.0f, -70.0f, 0.78f, 1.7f);
-    tree_lolli(300.0f, -70.0f, 0.82f, 3.1f);
+    tree_round(-318.0f, -84.0f, 0.86f, 1.7f);
+    tree_round(322.0f, -84.0f, 0.9f, 3.1f);
     tree_cone(405.0f, -62.0f, 1.0f, 4.6f);
     /* little flowers on the hill tops, swaying */
     static const float fxs[] = { -440, -372, -330, -236, -214, 246, 268, 352, 380, 440 };

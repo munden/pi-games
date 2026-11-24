@@ -20,13 +20,13 @@
 #define GROUND_Y (WYB - BAR_B)
 
 typedef struct {
-    PG_Tex wood_h, wood_v, post, wall, ground, sea, rays, trunk, leaf, coconut, btn, btnbase, crate, hand;
-    PG_Tex stem, ball, bucket, sandcap, starfish, slot, spade, sheen, puff;
-    PG_Tex sun[3], cloud[2], flower[3];
+    PG_Tex wood_h, wood_v, post, wall, ground, sea, rays, trunk, leaf, btn, btnbase, crate, hand;
+    PG_Tex stem, ball, bucket, starfish, sheen, puff, cloud, flower;
+    PG_Tex sun[3];
     PG_Mesh *bar_top, *bar_bot, *bar_l, *bar_r, *post_t, *post_b;
     PG_Mesh *panel, *tun_l, *tun_r, *tun_t, *tun_b;
     PG_Mesh *ground_tile, *sea_quad, *trunk_seg, *leaf_m, *coconut_m, *crate_m, *btn_cap, *btn_ring, *ball_m;
-    PG_Mesh *bucket_m, *bucket_cap, *stem_m, *decal, *spade_h, *spade_b, *slot_m;
+    PG_Mesh *bucket_m, *bucket_cap, *stem_m, *decal, *spade_h, *spade_b, *slot_m, *trim;
 } Art;
 
 extern Art A;

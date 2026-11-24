@@ -219,53 +219,65 @@ PG_Image *paint_frame(void)
 }
 
 /* wrapping paper (dots / stripes / stars) with a ribbon cross; every face of the box gets the same picture */
-PG_Image *paint_gift(uint32_t paper, uint32_t ribbon, int style)
+static void gift_cell(PG_Image *im, int ox, int oy, uint32_t paper, uint32_t ribbon, int style)
 {
-    PG_Image *im = pg_img_new(32, 32, C24(paper));
+    pg_img_rect(im, ox, oy, 32, 32, C24(paper));
     uint32_t light = mixc(C24(paper), 0xFFFFFFFFu, 0.38f);
     if (style == 0) {
         for (int j = 0; j < 4; j++)
-            for (int i = 0; i < 4; i++) pg_img_disc(im, 4.0f + 8.0f * (float)i + ((j & 1) ? 4.0f : 0.0f), 4.0f + 8.0f * (float)j, 1.8f, light);
+            for (int i = 0; i < 4; i++) pg_img_disc(im, (float)ox + 4.0f + 8.0f * (float)i + ((j & 1) ? 4.0f : 0.0f), (float)oy + 4.0f + 8.0f * (float)j, 1.8f, light);
     } else if (style == 1) {
-        for (int x = 0; x < 32; x += 8) pg_img_rect(im, x, 0, 4, 32, light);
+        for (int x = 0; x < 32; x += 8) pg_img_rect(im, ox + x, oy, 4, 32, light);
     } else {
         for (int j = 0; j < 3; j++)
-            for (int i = 0; i < 3; i++) pg_img_star(im, 5.0f + 11.0f * (float)i + ((j & 1) ? 5.0f : 0.0f), 5.0f + 11.0f * (float)j, 3.6f, 1.6f, 5, 0.0f, light);
+            for (int i = 0; i < 3; i++) pg_img_star(im, (float)ox + 5.0f + 11.0f * (float)i + ((j & 1) ? 5.0f : 0.0f), (float)oy + 5.0f + 11.0f * (float)j, 3.6f, 1.6f, 5, 0.0f, light);
     }
     uint32_t rd = mixc(C24(ribbon), 0xFF000000u, 0.22f), rl = mixc(C24(ribbon), 0xFFFFFFFFu, 0.35f);
-    pg_img_rect(im, 12, 0, 8, 32, C24(ribbon));
-    pg_img_rect(im, 0, 12, 32, 8, C24(ribbon));
-    pg_img_rect(im, 12, 0, 1, 32, rd); pg_img_rect(im, 19, 0, 1, 32, rd);
-    pg_img_rect(im, 0, 12, 32, 1, rd); pg_img_rect(im, 0, 19, 32, 1, rd);
-    pg_img_rect(im, 15, 0, 2, 32, rl); pg_img_rect(im, 0, 15, 32, 2, rl);
-    pg_img_frame(im, 0, 0, 32, 32, 1, mixc(C24(paper), 0xFF000000u, 0.18f));
+    pg_img_rect(im, ox + 12, oy, 8, 32, C24(ribbon));
+    pg_img_rect(im, ox, oy + 12, 32, 8, C24(ribbon));
+    pg_img_rect(im, ox + 12, oy, 1, 32, rd); pg_img_rect(im, ox + 19, oy, 1, 32, rd);
+    pg_img_rect(im, ox, oy + 12, 32, 1, rd); pg_img_rect(im, ox, oy + 19, 32, 1, rd);
+    pg_img_rect(im, ox + 15, oy, 2, 32, rl); pg_img_rect(im, ox, oy + 15, 32, 2, rl);
+    pg_img_frame(im, ox, oy, 32, 32, 1, mixc(C24(paper), 0xFF000000u, 0.18f));
+}
+
+PG_Image *paint_gifts(void)
+{
+    static const uint32_t paper[4] = { 0x4B8BFF, 0xFF5252, 0x39C46A, 0xA66BFF }, ribn[4] = { 0xFFD23F, 0xFFFFFF, 0xFF7EB8, 0xFFD23F };
+    PG_Image *im = pg_img_new(64, 64, 0xFF000000u);
+    for (int k = 0; k < 4; k++) gift_cell(im, (k & 1) * 32, (k >> 1) * 32, paper[k], ribn[k], k % 3);
     pg_img_noise(im, 4, 3);
     return im;
 }
 
-/* a bow, drawn as a sprite on top of a present (transparent background) */
-PG_Image *paint_bow(uint32_t ribbon)
+/* bows, drawn as sprites on top of the presents (transparent background) */
+static void bow_cell(PG_Image *im, int ox, uint32_t ribbon)
 {
-    PG_Image *im = pg_img_new(32, 32, 0x00FFFFFFu);
     uint32_t dark = mixc(C24(ribbon), 0xFF000000u, 0.25f), lite = mixc(C24(ribbon), 0xFFFFFFFFu, 0.45f);
-    pg_img_line(im, 16, 17, 8, 29, 5.0f, dark);
-    pg_img_line(im, 16, 17, 24, 29, 5.0f, dark);
-    pg_img_line(im, 16, 17, 8.5f, 28, 3.0f, C24(ribbon));
-    pg_img_line(im, 16, 17, 23.5f, 28, 3.0f, C24(ribbon));
+    float fx = (float)ox;
+    pg_img_line(im, fx + 16, 17, fx + 8, 29, 5.0f, dark);
+    pg_img_line(im, fx + 16, 17, fx + 24, 29, 5.0f, dark);
+    pg_img_line(im, fx + 16, 17, fx + 8.5f, 28, 3.0f, C24(ribbon));
+    pg_img_line(im, fx + 16, 17, fx + 23.5f, 28, 3.0f, C24(ribbon));
     for (int side = -1; side <= 1; side += 2) {
         float cx = 16.0f + (float)side * 7.5f;
         for (int j = 0; j < 32; j++)
             for (int i = 0; i < 32; i++) {
                 float dx = ((float)i + 0.5f - cx) / 8.2f, dy = ((float)j + 0.5f - 12.5f) / 7.0f;
                 float q = sqrtf(dx * dx + dy * dy);
-                float ao = clampf((1.0f - q) * 8.0f, 0, 1);
-                float ai = clampf((q - 0.5f) * 8.0f, 0, 1);
-                float a = ao * ai;
-                if (a > 0) plot(im, i, j, j < 12 ? lite : C24(ribbon), a);
+                float a = clampf((1.0f - q) * 8.0f, 0, 1) * clampf((q - 0.5f) * 8.0f, 0, 1);
+                if (a > 0) plot(im, ox + i, j, j < 12 ? lite : C24(ribbon), a);
             }
     }
-    pg_img_disc(im, 16, 14, 4.4f, dark);
-    pg_img_disc(im, 15.4f, 13.4f, 3.0f, C24(ribbon));
+    pg_img_disc(im, fx + 16, 14, 4.4f, dark);
+    pg_img_disc(im, fx + 15.4f, 13.4f, 3.0f, C24(ribbon));
+}
+
+PG_Image *paint_bows(void)
+{
+    static const uint32_t ribbon[4] = { 0xFFD23F, 0xFFF3F3, 0xFF7EB8, 0xFFD23F };
+    PG_Image *im = pg_img_new(128, 32, 0x00FFFFFFu);
+    for (int k = 0; k < 4; k++) bow_cell(im, k * 32, ribbon[k]);
     return im;
 }
 
@@ -292,8 +304,8 @@ PG_Image *paint_flags(void)
 
 PG_Image *paint_twine(void)
 {
-    PG_Image *im = pg_img_new(8, 8, C24(0xD7B48A));
-    pg_img_stripes(im, 1, 3, C24(0xD7B48A), C24(0xB8946A));
+    PG_Image *im = pg_img_new(16, 16, C24(0xD7B48A));
+    pg_img_stripes(im, 2, 3, C24(0xD7B48A), C24(0xB8946A));
     pg_img_noise(im, 6, 2);
     return im;
 }
@@ -303,6 +315,21 @@ PG_Image *paint_streamer(uint32_t a, uint32_t b)
     PG_Image *im = pg_img_new(16, 32, C24(a));
     pg_img_stripes(im, 4, 8, C24(a), C24(b));
     pg_img_noise(im, 4, 13);
+    return im;
+}
+
+/* crepe-paper streamers: four two-colour diagonal-stripe cells */
+PG_Image *paint_streamers(void)
+{
+    static const uint32_t ca[4] = { 0xFF7EB6, 0xFFD83A, 0x57A8FF, 0x58D68D }, cb[4] = { 0xFFE6F1, 0xFF9A2E, 0xE8F4FF, 0xE8FF9A };
+    PG_Image *im = pg_img_new(128, 32, 0xFFFFFFFFu);
+    for (int k = 0; k < 4; k++)
+        for (int j = 0; j < 32; j++)
+            for (int i = 0; i < 32; i++) {
+                int d = (i + j) % 8;
+                im->px[j * 128 + k * 32 + i] = C24(d < 4 ? ca[k] : cb[k]);
+            }
+    pg_img_noise(im, 4, 21);
     return im;
 }
 
@@ -347,16 +374,17 @@ PG_Image *paint_hand(void)
 }
 
 /* ---------------------------------------------------------------- prizes */
-PG_Image *paint_prize(int kind)
+/* three 32x32 skins side by side: gold star, pink heart, magenta note */
+PG_Image *paint_prizes(void)
 {
-    PG_Image *im = pg_img_new(32, 32, 0xFFFFFFFFu);
-    uint32_t top, bot, hi;
-    if (kind == 0)      { top = 0xFFF58A; bot = 0xFFB000; hi = 0xFFFFD0; }
-    else if (kind == 1) { top = 0xFF9DC2; bot = 0xE5285A; hi = 0xFFD2E2; }
-    else                { top = 0xFF8CF0; bot = 0x9A1FD0; hi = 0xFFD2FA; }
-    pg_img_gradient_v(im, 0, 0, 32, 32, C24(top), C24(bot));
-    pg_img_line(im, 2, 30, 30, 2, 6, mixc(C24(hi), C24(top), 0.5f));
-    for (int k = 0; k < 6; k++) pg_img_disc(im, 4.0f + 5.0f * (float)k, 6.0f + 3.5f * (float)((k * 5) % 6), 0.9f, C24(hi));
-    pg_img_noise(im, 4, 7 + (uint32_t)kind);
+    static const uint32_t tops[3] = { 0xFFF58A, 0xFF9DC2, 0xFF8CF0 }, bots[3] = { 0xFFB000, 0xE5285A, 0x9A1FD0 }, his[3] = { 0xFFFFD0, 0xFFD2E2, 0xFFD2FA };
+    PG_Image *im = pg_img_new(96, 32, 0xFFFFFFFFu);
+    for (int k = 0; k < 3; k++) {
+        float ox = (float)(k * 32);
+        pg_img_gradient_v(im, k * 32, 0, 32, 32, C24(tops[k]), C24(bots[k]));
+        pg_img_line(im, ox + 2, 30, ox + 30, 2, 6, mixc(C24(his[k]), C24(tops[k]), 0.5f));
+        for (int i = 0; i < 6; i++) pg_img_disc(im, ox + 4.0f + 5.0f * (float)i, 6.0f + 3.5f * (float)((i * 5) % 6), 0.9f, C24(his[k]));
+    }
+    pg_img_noise(im, 4, 7);
     return im;
 }

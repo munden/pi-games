@@ -1,0 +1,4 @@
+# Poses the scene for the launcher icon (make icon GAME=block-tower): the towers stand, a block is lifted by a finger,
+# a fresh block is dropping in with sparkles.
+drag 120 140 0 530 150 450 118
+tap  214 1 640 120

@@ -28,7 +28,7 @@ static int   next_free;
 static float pop_load;                                   /* decays; many pops in a short time use fewer pieces */
 static Prize PZ[MAX_PRIZES];
 static PG_Mesh *m_prize[3];
-static PG_Tex t_prize[3], t_sparkle, t_ring, t_hand;
+static PG_Tex t_prizes, t_sparkle, t_ring, t_hand;
 static float prize_cd;
 
 static struct { float alpha, t, tx, ty, tr; int tgt; uint32_t gen; bool rippled; } H;
@@ -118,9 +118,9 @@ void fx_prize(PG_V3 p)
     float sx, sy, wx = p.x, wy = p.y;
     if (cam_project(p.x, p.y, p.z, &sx, &sy)) cam_unproject(sx, sy, PRIZE_Z, &wx, &wy);   /* same spot on screen, nearer the camera */
     p = pg_v3(wx, wy, PRIZE_Z);
-#ifdef BP_DEBUG_PRIZES
-    static int dbg_kind;
-    z->kind = dbg_kind++ % 3;
+#ifdef BP_DEBUG
+    static int dbg_kind;                                         /* dev only: cycle the kinds so each can be inspected */
+    z->kind = getenv("BP_PRIZES") ? dbg_kind++ % 3 : pg_rand_int(0, 2);
 #else
     z->kind = pg_rand_int(0, 2);
 #endif
@@ -235,7 +235,7 @@ void fx_init(void)
     t_sparkle = tex_upload(paint_sparkle(), false);
     t_ring = tex_upload(paint_ring(), false);
     t_hand = tex_upload(paint_hand(), true);
-    for (int k = 0; k < 3; k++) t_prize[k] = tex_upload(paint_prize(k), true);
+    t_prizes = tex_upload(paint_prizes(), true);
     m_prize[0] = mesh_star(); m_prize[1] = mesh_heart(); m_prize[2] = mesh_note();
     memset(P, 0, sizeof P); memset(PZ, 0, sizeof PZ); memset(&H, 0, sizeof H);
     next_free = 0; pop_load = 0; prize_cd = 0; H.tgt = -1;
@@ -334,67 +334,83 @@ void fx_draw(void)
         float out = z->age > z->life - 0.8f ? (z->life - z->age) / 0.8f : 1.0f;
         float s = PRIZE_R * in * over * (0.4f + 0.6f * out);
         PG_M4 m = pg_m4_mul(pg_m4_translate(z->p.x, z->p.y, z->p.z), pg_m4_mul(pg_m4_rot_y(z->spin), pg_m4_mul(pg_m4_rot_z(0.14f * sinf(z->age * 2.3f + z->ph)), pg_m4_scale(s, s, s))));
-        pg3d_mesh(m_prize[z->kind], t_prize[z->kind], &m, pg_rgba(255, 255, 255, (uint8_t)(out * 255.0f)), 0);
+        pg3d_mesh(m_prize[z->kind], tex_sub(t_prizes, z->kind * 32, 0, 32, 32, 96, 32), &m, pg_rgba(255, 255, 255, (uint8_t)(out * 255.0f)), 0);
         float halo = 112.0f * in * (0.92f + 0.08f * sinf(z->age * 6.0f));          /* soft warm glow BEHIND the prize (alpha blended) */
         pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(z->p.x, z->p.y, z->p.z - 30.0f), halo, halo, 0, pg_rgba(255, 214, 96, (uint8_t)(190.0f * out)), 0);
     }
 }
 
 /* ------------------------------------------------------------ touch glow */
-void fx_touch_glow(const PG_Touch *t)
+void fx_touch_glow(const PG_Touch *t, float strength)
 {
     const float z = 230.0f;
     const Cam *cm = cam_get();
     float wx, wy;
     cam_unproject(t->x, t->y, z, &wx, &wy);
     float k = (cm->dist - z) / cm->focal;
-    float pulse = 0.5f + 0.5f * sinf(pg_time() * 7.0f + (float)t->id), pop = smooth01((float)(t->ticks + 1) / 7.0f);
+    float pulse = 0.5f + 0.5f * sinf(pg_time() * 7.0f + (float)t->id), pop = smooth01((float)(t->ticks + 1) / 7.0f) * strength;
     PG_Color hc = pg_hsv(fmodf(30.0f + 47.0f * (float)t->id, 360.0f), 0.62f, 1.0f);
     float g = 168.0f * k * (0.85f + 0.15f * pulse) * pop, rg = 82.0f * k * (1.0f + 0.07f * pulse) * pop;
-    pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(wx, wy, z), g, g, 0, pg_rgba(hc.r, hc.g, hc.b, 170), 0);
-    pg3d_sprite(t_ring, pg_v3(wx, wy, z + 1.0f), rg, rg, 0, pg_rgba(255, 255, 255, 235), 0);
-    pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(wx, wy, z + 2.0f), 74.0f * k * pop, 74.0f * k * pop, 0, pg_rgba(255, 255, 255, 190), PG3D_ADDITIVE);
+    pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(wx, wy, z), g, g, 0, pg_rgba(hc.r, hc.g, hc.b, (uint8_t)(170.0f * strength)), 0);
+    pg3d_sprite(t_ring, pg_v3(wx, wy, z + 1.0f), rg, rg, 0, pg_rgba(255, 255, 255, (uint8_t)(235.0f * strength)), 0);
+    pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(wx, wy, z + 2.0f), 74.0f * k * pop, 74.0f * k * pop, 0, pg_rgba(255, 255, 255, (uint8_t)(190.0f * strength)), PG3D_ADDITIVE);
 }
 
 /* -------------------------------------------------------------- hint hand */
-/* The hand glides in from the lower right, taps the balloon (a ripple, no pop) and hovers; a 2 s cycle. */
-#define HINT_CYCLE 2.0f
+/* The hand glides in from the lower right, taps the balloon twice (a ripple each, no pop), hovers, then
+ * glides out again. Between cycles it re-picks a balloon that is comfortably on screen. */
+#define HINT_CYCLE 2.5f
+
+static float hint_near(float ph)                    /* 1 = far away (lower right), 0 = on the balloon */
+{
+    if (ph < 0.55f) return 1.0f - smooth01(ph / 0.55f);
+    if (ph < 1.85f) return 0.0f;
+    return smooth01((ph - 1.85f) / 0.65f);
+}
+
+static float hint_dip(float ph)                     /* 1 = pressed in */
+{
+    static const float at[2] = { 0.55f, 1.15f };
+    for (int i = 0; i < 2; i++)
+        if (ph >= at[i] && ph < at[i] + 0.25f) return ph < at[i] + 0.11f ? smooth01((ph - at[i]) / 0.11f) : 1.0f - smooth01((ph - at[i] - 0.11f) / 0.14f);
+    return 0.0f;
+}
 
 void hint_update(float idle_s, bool first_time)
 {
     bool want = idle_s >= (first_time ? 2.2f : 5.0f);
+    float prev = fmodf(H.t, HINT_CYCLE);
     if (want) { H.alpha = fminf(1.0f, H.alpha + DT * 3.0f); H.t += DT; }
-    else { H.alpha = fmaxf(0.0f, H.alpha - DT * 6.0f); if (H.alpha <= 0) { H.t = 0; H.rippled = false; } }
+    else { H.alpha = fmaxf(0.0f, H.alpha - DT * 6.0f); if (H.alpha <= 0) { H.t = 0; H.tgt = -1; H.tr = 0; } }
     if (H.alpha <= 0) return;
-    if (!balloon_alive(H.tgt, H.gen)) {
-        H.tgt = balloon_for_hint(); H.gen = balloon_gen(H.tgt);
-        float sx, sy, sr;
-        if (balloon_screen(H.tgt, &sx, &sy, &sr)) { H.tx = sx; H.ty = sy; H.tr = sr; }
+    float ph = fmodf(H.t, HINT_CYCLE);
+    if (H.tgt < 0 || !balloon_alive(H.tgt, H.gen) || ph < prev) {          /* appearing, target gone, or a new cycle */
+        int pick = balloon_for_hint(H.tgt, H.gen);
+        if (pick != H.tgt || !balloon_alive(H.tgt, H.gen)) { H.tgt = pick; H.gen = balloon_gen(pick); }
     }
     float sx, sy, sr;
-    if (balloon_screen(H.tgt, &sx, &sy, &sr)) { H.tx += (sx - H.tx) * 0.2f; H.ty += (sy - H.ty) * 0.2f; H.tr = sr; }
-    float ph = fmodf(H.t, HINT_CYCLE);
-    if (ph < 0.2f) H.rippled = false;
-    if (ph >= 0.72f && !H.rippled && H.tgt >= 0) {
-        H.rippled = true;
-        float wx, wy;
-        cam_unproject(H.tx, H.ty + H.tr * 0.1f, 40.0f, &wx, &wy);
-        fx_ripple(pg_v3(wx, wy, 40.0f), 110.0f, pg_rgb(255, 255, 255));
+    if (H.tgt >= 0 && balloon_screen(H.tgt, &sx, &sy, &sr)) {
+        if (H.tr <= 0) { H.tx = sx; H.ty = sy; }
+        H.tx += (sx - H.tx) * 0.2f; H.ty += (sy - H.ty) * 0.2f; H.tr = sr;
     }
+    static const float rip[2] = { 0.64f, 1.24f };
+    for (int i = 0; i < 2; i++)
+        if (H.tgt >= 0 && prev < rip[i] && ph >= rip[i]) {
+            float wx, wy;
+            cam_unproject(H.tx, H.ty + H.tr * 0.1f, 40.0f, &wx, &wy);
+            fx_ripple(pg_v3(wx, wy, 40.0f), 110.0f, pg_rgb(255, 255, 255));
+        }
 }
 
 void hint_draw(void)
 {
-    if (H.alpha <= 0.01f || H.tgt < 0) return;
+    if (H.alpha <= 0.01f || H.tgt < 0 || H.tr <= 0) return;
     const float W = 118.0f;
-    float ph = fmodf(H.t, HINT_CYCLE);
-    float near_px = ph < 0.65f ? 1.0f - smooth01(ph / 0.65f) : 0.0f, dip = 0;
-    if (ph >= 0.65f && ph < 0.80f) dip = smooth01((ph - 0.65f) / 0.15f);
-    else if (ph >= 0.80f && ph < 1.05f) dip = 1.0f - smooth01((ph - 0.80f) / 0.25f);
-    float bob = ph > 1.05f ? sinf((ph - 1.05f) * 5.0f) * 4.0f : 0.0f;
+    float ph = fmodf(H.t, HINT_CYCLE), near_px = hint_near(ph), dip = hint_dip(ph);
+    float bob = near_px == 0.0f && dip == 0.0f ? sinf(H.t * 4.0f) * 3.0f : 0.0f;
     float tipx = H.tx + H.tr * 0.05f, tipy = H.ty + H.tr * 0.12f;
-    float cx = tipx + (0.5f - 0.31f) * W + near_px * 120.0f - dip * 9.0f;
-    float cy = tipy + (0.5f - 0.10f) * W + near_px * 110.0f + bob - dip * 9.0f;
+    float cx = tipx + (0.5f - 0.31f) * W + near_px * 130.0f - dip * 10.0f;
+    float cy = tipy + (0.5f - 0.10f) * W + near_px * 120.0f + bob - dip * 10.0f;
     const float z = 260.0f;
     float wx, wy;
     cam_unproject(cx, cy, z, &wx, &wy);

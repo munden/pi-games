@@ -10,6 +10,7 @@ painted balls (stripes, dots, stars, hearts, daisies, swirls, beach balls, smile
 - **Touch empty space.** Three balls drop from the beam, playing a little tune (low notes left, high notes right).
   Hold a finger there to keep pouring slowly.
 - Balls bounce, roll, squash and pile up. At 70 balls the oldest one pops out in a puff of stars, so it never fills up.
+- Touch the painted sun and it giggles; balls that hit the beam rattle the bunting.
 - Left alone: balls rain gently (up to about 20), and a pointing hand shows what to do (first seconds, again after 8 s).
 
 ## Files

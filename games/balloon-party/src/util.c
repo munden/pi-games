@@ -61,6 +61,14 @@ PG_Tex tex_upload(PG_Image *im, bool dither)
     return t;
 }
 
+PG_Tex tex_sub(PG_Tex t, int cx, int cy, int cw, int ch, int W, int H)
+{
+    float du = t.u1 - t.u0, dv = t.v1 - t.v0;
+    PG_Tex r = { t.u0 + du * ((float)cx + 0.5f) / (float)W, t.v0 + dv * ((float)cy + 0.5f) / (float)H,
+                 t.u0 + du * ((float)(cx + cw) - 0.5f) / (float)W, t.v0 + dv * ((float)(cy + ch) - 0.5f) / (float)H };
+    return r;
+}
+
 /* ----------------------------------------------------------- mesh builder */
 Build build_new(int max_v, int max_i)
 {

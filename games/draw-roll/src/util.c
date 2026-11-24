@@ -23,6 +23,13 @@ PG_Tex tex_finish(PG_Image *im, bool ps1)
     return t;
 }
 
+void img_blit(PG_Image *dst, const PG_Image *src, int ox, int oy)
+{
+    for (int j = 0; j < src->h; j++)
+        for (int i = 0; i < src->w; i++)
+            if (ox + i >= 0 && ox + i < dst->w && oy + j >= 0 && oy + j < dst->h) dst->px[(oy + j) * dst->w + ox + i] = src->px[j * src->w + i];
+}
+
 PG_Tex tex_sub(PG_Tex s, int sw, int sh, int x, int y, int w, int h)
 {
     float du = (s.u1 - s.u0) / (float)sw, dv = (s.v1 - s.v0) / (float)sh;

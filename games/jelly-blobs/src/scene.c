@@ -25,6 +25,11 @@ static PG_Mesh *m_rail, *m_sill, *m_bar_h, *m_bar_v, *m_frame_h, *m_frame_v, *m_
 static PG_Mesh *m_block, *m_ball, *m_duck_body, *m_duck_head, *m_beak;
 static PG_M4 ident;
 
+/* The pillow is one shared dynamic mesh: 1 apex, 16 shoulder, 32 rim and 32 skirt-back vertices. The topology never
+ * changes; positions, normals, uvs and colours are refilled for each blob every frame (no allocation). */
+enum { V_TOP = 0, V_MID = 1, V_RIM = 1 + SB_N, V_BAK = 1 + 3 * SB_N, NV_BLOB = 1 + 5 * SB_N, NI_BLOB = (SB_N * 4 + SB_N * 2 * 2) * 3 };
+static PG_Mesh *m_blob;
+
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 /* ----------------------------------------------------------------------- mesh building */
@@ -87,6 +92,23 @@ void scene_init(const Art *art)
     m_duck_head = pg_mesh_sphere(14, 10, 7);
     m_beak     = pg_mesh_cone(5, 6, 6);
 
+    m_blob = pg_mesh_new(NV_BLOB, NI_BLOB);
+    {
+        uint16_t *ix = m_blob->idx;
+        int n = 0;
+        for (int i = 0; i < SB_N; i++) {
+            int j = i + 1 == SB_N ? 0 : i + 1, r0 = 2 * i, r1 = 2 * i + 1, r2 = (2 * i + 2) % (2 * SB_N);
+            const int tris[4][3] = { { V_TOP, V_MID + i, V_MID + j }, { V_MID + i, V_RIM + r0, V_RIM + r1 },
+                                     { V_MID + i, V_RIM + r1, V_MID + j }, { V_MID + j, V_RIM + r1, V_RIM + r2 } };
+            for (int k = 0; k < 4; k++) for (int c = 0; c < 3; c++) ix[n++] = (uint16_t)tris[k][c];
+        }
+        for (int k = 0; k < 2 * SB_N; k++) {
+            int k1 = (k + 1) % (2 * SB_N);
+            ix[n++] = (uint16_t)(V_RIM + k); ix[n++] = (uint16_t)(V_BAK + k); ix[n++] = (uint16_t)(V_BAK + k1);
+            ix[n++] = (uint16_t)(V_RIM + k); ix[n++] = (uint16_t)(V_BAK + k1); ix[n++] = (uint16_t)(V_RIM + k1);
+        }
+    }
+
     pg3d_sky(pg_hex(0xCFE5FF), pg_hex(0xFFEFD8));
     pg3d_light(pg_v3(-0.40f, 0.70f, 0.60f), pg_hex(0xFFF2DC), pg_hex(0x9AA5C9), pg_hex(0x8F7589));
     pg3d_fog(pg_hex(0xF0E6FF), 720.0f, 1500.0f);
@@ -95,7 +117,7 @@ void scene_init(const Art *art)
 void scene_shutdown(void)
 {
     PG_Mesh **all[] = { &m_wall, &m_wain, &m_swl, &m_swl_w, &m_swr, &m_swr_w, &m_ceil, &m_floor, &m_rail, &m_sill, &m_bar_h, &m_bar_v,
-                        &m_frame_h, &m_frame_v, &m_board, &m_brace, &m_block, &m_ball, &m_duck_body, &m_duck_head, &m_beak };
+                        &m_frame_h, &m_frame_v, &m_board, &m_brace, &m_block, &m_ball, &m_duck_body, &m_duck_head, &m_beak, &m_blob };
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) { pg_mesh_free(*all[i]); *all[i] = NULL; }
 }
 
@@ -252,8 +274,6 @@ void scene_draw_shadow(const SoftBlob *b)
 }
 
 /* ------------------------------------------------------------------------ the blob */
-float scene_dome_height(const SoftBlob *b) { return DOME_K * sqrtf(fmaxf(b->area, 100.0f) / PG_PI); }
-
 static PG_V3 norm3(float x, float y, float z) { return pg_v3_norm(pg_v3(x, y, z)); }
 
 static void vset(PG_Vertex *v, float x, float y, float z, PG_V3 n, float u, float vv, PG_Color c)
@@ -264,7 +284,7 @@ static void vset(PG_Vertex *v, float x, float y, float z, PG_V3 n, float u, floa
 static void face_spr(PG_Tex tex, float fx_, float fy_, float lx, float ly, float w, float h, float z, float rot, float fw, float fh, float R, float cr, float sr, PG_Color tint)
 {
     float X = fx_ + (lx * fw * cr - ly * fh * sr) * R, Y = fy_ + (lx * fw * sr + ly * fh * cr) * R;
-    pg3d_sprite(tex, pg_v3(X, Y, z), w * R * fw, h * R * fh, rot, tint, 0);
+    pg3d_sprite(tex, pg_v3(X, Y, z), w * R * fw, h * R * fh, -rot, tint, 0);     /* rot is counter-clockwise (world, y up); sprite roll is clockwise */
 }
 
 static void draw_face(const SoftBlob *b, const BlobFx *fx, float H)
@@ -314,9 +334,7 @@ static inline float cr_mid(float a, float b, float c, float d) { return (-a + 9.
 void scene_draw_blob(const SoftBlob *b, const BlobFx *fx, float t)
 {
     (void)t;
-    enum { NR2 = SB_N * 2 };
-    static PG_Vertex rim[NR2], bak[NR2], mid[SB_N];
-    PG_Vertex top;
+    PG_Vertex *V = m_blob->v;
     const float Re = sqrtf(fmaxf(b->area, 100.0f) / PG_PI);
     const float H = DOME_K * Re, D = SKIRT_K * Re;
     const float ax = b->x[SB_C], ay = b->y[SB_C];
@@ -331,45 +349,29 @@ void scene_draw_blob(const SoftBlob *b, const BlobFx *fx, float t)
         float u = 0.5f + b->qx[i] * inv, v = 0.5f - b->qy[i] * inv;
         float um = 0.5f + RHO * b->qx[i] * inv, vm = 0.5f - RHO * b->qy[i] * inv;
         /* the rim and the skirt are smoothed to 32 points so the silhouette is round, not a 16-gon */
-        vset(&rim[2 * i], b->x[i], b->y[i], 0.0f, norm3(nx * 0.92f, ny * 0.92f, 0.42f), u, v, crim);
-        vset(&bak[2 * i], b->x[i] + (b->cx - b->x[i]) * 0.05f, b->y[i] + (b->cy - b->y[i]) * 0.05f, -D, norm3(nx, ny, -0.1f), u, v, cbak);
+        vset(&V[V_RIM + 2 * i], b->x[i], b->y[i], 0.0f, norm3(nx * 0.92f, ny * 0.92f, 0.42f), u, v, crim);
+        vset(&V[V_BAK + 2 * i], b->x[i] + (b->cx - b->x[i]) * 0.05f, b->y[i] + (b->cy - b->y[i]) * 0.05f, -D, norm3(nx, ny, -0.1f), u, v, cbak);
         float mx = cr_mid(b->x[h], b->x[i], b->x[j], b->x[k]), my = cr_mid(b->y[h], b->y[i], b->y[j], b->y[k]);
         float cx2 = b->x[j] - b->x[i], cy2 = b->y[j] - b->y[i], cl = sqrtf(cx2 * cx2 + cy2 * cy2) + 1e-4f, mnx = cy2 / cl, mny = -cx2 / cl;
         float u2 = 0.5f + (b->qx[i] + b->qx[j]) * 0.5f * inv, v2 = 0.5f - (b->qy[i] + b->qy[j]) * 0.5f * inv;
-        vset(&rim[2 * i + 1], mx, my, 0.0f, norm3(mnx * 0.92f, mny * 0.92f, 0.42f), u2, v2, crim);
-        vset(&bak[2 * i + 1], mx + (b->cx - mx) * 0.05f, my + (b->cy - my) * 0.05f, -D, norm3(mnx, mny, -0.1f), u2, v2, cbak);
-        vset(&mid[i], ax + (b->x[i] - ax) * RHO, ay + (b->y[i] - ay) * RHO, zmid, norm3(nx * 0.62f, ny * 0.62f, 1.0f), um, vm, cmid);
+        vset(&V[V_RIM + 2 * i + 1], mx, my, 0.0f, norm3(mnx * 0.92f, mny * 0.92f, 0.42f), u2, v2, crim);
+        vset(&V[V_BAK + 2 * i + 1], mx + (b->cx - mx) * 0.05f, my + (b->cy - my) * 0.05f, -D, norm3(mnx, mny, -0.1f), u2, v2, cbak);
+        vset(&V[V_MID + i], ax + (b->x[i] - ax) * RHO, ay + (b->y[i] - ay) * RHO, zmid, norm3(nx * 0.62f, ny * 0.62f, 1.0f), um, vm, cmid);
     }
-    vset(&top, ax, ay, H, norm3((b->cx - ax) * 0.02f, (b->cy - ay) * 0.02f, 1.0f), 0.5f, 0.5f, ctop);
-    PG_Tex tex = A->jelly[fx->style % JB_STYLES];
-    for (int i = 0; i < SB_N; i++) {
-        int j = i + 1 == SB_N ? 0 : i + 1, r0 = 2 * i, r1 = 2 * i + 1, r2 = (2 * i + 2) % NR2;
-        pg3d_tri(tex, &top, &mid[i], &mid[j], 0);
-        pg3d_tri(tex, &mid[i], &rim[r0], &rim[r1], 0);
-        pg3d_tri(tex, &mid[i], &rim[r1], &mid[j], 0);
-        pg3d_tri(tex, &mid[j], &rim[r1], &rim[r2], 0);
-    }
-    for (int k = 0; k < NR2; k++) {
-        int k1 = (k + 1) % NR2;
-        pg3d_tri(tex, &rim[k], &bak[k], &bak[k1], 0);
-        pg3d_tri(tex, &rim[k], &bak[k1], &rim[k1], 0);
-    }
+    vset(&V[V_TOP], ax, ay, H, norm3((b->cx - ax) * 0.02f, (b->cy - ay) * 0.02f, 1.0f), 0.5f, 0.5f, ctop);
+    pg3d_mesh(m_blob, A->jelly[fx->style % JB_STYLES], &ident, pg_rgb(255, 255, 255), 0);
 
     draw_face(b, fx, H);
 
     /* a little leaf / sprout / antenna on top, swinging a bit */
-    {
-        float R0 = b->radius;
-        pg3d_sprite(art_cell(A->acc, fx->style, 3, 2), pg_v3(rim[16].x, rim[16].y + 0.16f * R0, H * 0.5f), 0.50f * R0, 0.50f * R0, b->tilt + fx->acc_a, pg_rgb(255, 255, 255), 0);
-    }
+    float R = b->radius;
+    pg3d_sprite(art_cell(A->acc, fx->style, 3, 2), pg_v3(V[V_RIM + 16].x, V[V_RIM + 16].y + 0.16f * R, H * 0.5f), 0.50f * R, 0.50f * R, -(b->tilt + fx->acc_a), pg_rgb(255, 255, 255), 0);
 
     /* glossy highlight: a bean and a dot on the upper-left shoulder, riding on the skin */
     const float rho_h = 0.70f, zh = H + 2.0f;
     float hx = ax + ((b->x[9] + b->x[10]) * 0.5f - ax) * rho_h, hy = ay + ((b->y[9] + b->y[10]) * 0.5f - ay) * rho_h;
-    PG_Tex bean = art_cell(A->fx, FX_BEAN, 4, 2), dot = art_cell(A->fx, FX_DOT, 4, 2);
-    float R = b->radius;
-    pg3d_sprite(bean, pg_v3(hx, hy, zh), 0.50f * R, 0.50f * R, b->tilt, pg_rgba(255, 255, 255, 240), 0);
-    pg3d_sprite(dot, pg_v3(hx + 0.20f * R, hy - 0.16f * R, zh), 0.18f * R, 0.18f * R, 0, pg_rgba(255, 255, 255, 225), 0);
+    pg3d_sprite(art_cell(A->fx, FX_BEAN, 4, 2), pg_v3(hx, hy, zh), 0.50f * R, 0.50f * R, -b->tilt, pg_rgba(255, 255, 255, 240), 0);
+    pg3d_sprite(art_cell(A->fx, FX_DOT, 4, 2), pg_v3(hx + 0.20f * R, hy - 0.16f * R, zh), 0.18f * R, 0.18f * R, 0, pg_rgba(255, 255, 255, 225), 0);
     /* a faint glow inside, as if the candy were lit from behind */
     pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), pg_v3(ax, ay - 0.05f * R, H * 0.9f), 1.5f * R, 1.3f * R, 0, pg_alpha(pg_color_lerp(art_candy(fx->style), pg_rgb(255, 255, 255), 0.30f), 0.15f), PG3D_ADDITIVE);
 }

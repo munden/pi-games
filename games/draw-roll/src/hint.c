@@ -57,8 +57,6 @@ void hint_init(void)
 
 void hint_shutdown(void) {}
 
-bool hint_busy(void) { return H.state != H_IDLE; }
-
 void hint_skip_to(float idle_seconds) { if (H.state == H_IDLE) H.idle = idle_seconds; }
 
 /* Catmull-Rom through the control points, jittered and maybe mirrored, then arc lengths */
@@ -114,7 +112,7 @@ static void abort_hint(void)
 
 void hint_update(bool any_down, bool any_active)
 {
-    if (any_down) { H.idle = 0.0f; if (H.state != H_IDLE) abort_hint(); }
+    if (any_down) { H.idle = 0.0f; H.first = false; if (H.state != H_IDLE) abort_hint(); }   /* a child who already plays needs no first demo */
     else if (!any_active) H.idle += PG_DT;
     H.t += PG_DT;
     switch (H.state) {
