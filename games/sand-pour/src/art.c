@@ -496,8 +496,8 @@ void art_init(void)
     A.leaf_m = mesh_leaf(112.0f, 24.0f, 34.0f);
     A.coconut_m = pg_mesh_sphere(8.0f, 8, 5);
     A.crate_m = pg_mesh_bevel_box(62.0f, 58.0f, 42.0f, 11.0f);
-    A.btn_cap = pg_mesh_cylinder(45.0f, 9.0f, 24);
-    A.btn_ring = pg_mesh_cylinder(53.0f, 5.0f, 24);
+    A.btn_cap = pg_mesh_cylinder(47.0f, 9.0f, 24);
+    A.btn_ring = pg_mesh_cylinder(55.0f, 5.0f, 24);
     A.ball_m = pg_mesh_sphere(30.0f, 14, 10);
     A.bucket_m = mesh_frustum(21.0f, 29.0f, 24.0f, 14);
     A.bucket_cap = mesh_disc(27.0f, 14);

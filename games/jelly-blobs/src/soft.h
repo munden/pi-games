@@ -37,6 +37,7 @@ typedef struct {
     unsigned char cf[SB_NP];                                /* contact flags of the current substep */
     float qx[SB_NP], qy[SB_NP];                              /* rest offsets from the centroid (px) */
     float edge0[SB_N];                                       /* rest edge lengths */
+    float bend0[SB_N];                                       /* rest curvature of the skin at each particle (px) */
     float radius;                                            /* equivalent radius: rest area = pi * radius^2 */
     float area0, foot;                                       /* rest area, rest height of the centroid above the floor */
     float wrest, hrest;                                      /* rest width and height */

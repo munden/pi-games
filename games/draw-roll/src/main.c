@@ -75,7 +75,7 @@ static void do_wipe(void)
 {
     strokes_wipe();
     toys_sponge_wipe();
-    hint_skip_to(5.0f);
+    hint_skip_to(0.0f);
 }
 
 static void touch_down(int i, const PG_Touch *p, const PG_V3 *w)
@@ -149,7 +149,7 @@ static int init(SDL_Renderer *r)
     pg_world_set_contact_fn(world, on_contact, NULL);
 
     pg3d_sky(pg_hex(0x6EC0FF), pg_hex(0xFFEBC8));
-    pg3d_light(pg_v3(-0.42f, 0.78f, 0.62f), pg_rgb(218, 208, 190), pg_rgb(170, 180, 208), pg_rgb(124, 114, 102));
+    pg3d_light(pg_v3(-0.42f, 0.78f, 0.62f), pg_rgb(214, 204, 186), pg_rgb(176, 186, 214), pg_rgb(146, 136, 128));
 
     fx_init();
     scene_init();

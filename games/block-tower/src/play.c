@@ -17,8 +17,12 @@
 #define PAD_R           24.0f             /* radius of the finger paddle */
 #define THROW_MAX       1300.0f           /* fastest throw (px/s) */
 #define HOLD_MAX        1500.0f           /* fastest a held block may move: thin blocks never tunnel */
+#ifndef HINT_AFTER
 #define HINT_AFTER      3.0f              /* seconds untouched before the hint hand shows */
-#define ATTRACT_AFTER   20.0f             /* seconds untouched before a ball rolls in */
+#endif
+#ifndef ATTRACT_AFTER
+#define ATTRACT_AFTER   20.0f             /* seconds untouched before a ball rolls in (tests may shorten it) */
+#endif
 
 /* ================================================================== particles */
 static Part *part_alloc(Game *g)
@@ -635,17 +639,6 @@ static void fingers_apply(Game *g, float dt)
 }
 
 /* ========================================================== idle behaviour */
-static Block *tallest_box(Game *g)
-{
-    Block *best = NULL;
-    for (int i = 0; i < MAX_BLOCKS; i++) {
-        Block *b = &g->blocks[i];
-        if (!b->body || b->kind != KIND_BOX) continue;
-        if (!best || b->body->y > best->body->y) best = b;
-    }
-    return best;
-}
-
 /* the highest block whose top still leaves room above it for a new block to drop (else any block) */
 static Block *hint_target(Game *g)
 {
@@ -662,18 +655,35 @@ static Block *hint_target(Game *g)
 
 static void launch_ball(Game *g)
 {
-    Block *ball = NULL, *tower = tallest_box(g);
-    float tx = tower ? tower->body->x : 0.0f;
-    for (int i = 0; i < MAX_BLOCKS; i++) {          /* the ball that is farthest from the tower rolls in */
+    /* the ball farthest from the boxes rolls in at the structure nearest to it */
+    Block *ball = NULL;
+    float cx = 0;
+    int boxes = 0;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        const Block *b = &g->blocks[i];
+        if (b->body && b->kind == KIND_BOX) { cx += b->body->x; boxes++; }
+    }
+    if (boxes == 0) { start_tidy(g, 1); return; }
+    cx /= (float)boxes;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
         Block *b = &g->blocks[i];
         if (!b->body || b->kind != KIND_BALL || b->holders) continue;
-        if (!ball || fabsf(b->body->x - tx) > fabsf(ball->body->x - tx)) ball = b;
+        if (!ball || fabsf(b->body->x - cx) > fabsf(ball->body->x - cx)) ball = b;
     }
-    if (!ball || !tower) { start_tidy(g, 1); return; }
-    /* a lob that arrives at the height of the tower's top block */
+    if (!ball) { start_tidy(g, 1); return; }
     PG_Body *bb = ball->body;
-    float dir = tower->body->x > bb->x ? 1.0f : -1.0f, vx = dir * 720.0f;
-    float t = fmaxf(fabsf(tower->body->x - bb->x) - 70.0f, 120.0f) / 720.0f;
+    Block *near = NULL, *tower = NULL;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        Block *b = &g->blocks[i];
+        if (b->body && b->kind == KIND_BOX && (!near || fabsf(b->body->x - bb->x) < fabsf(near->body->x - bb->x))) near = b;
+    }
+    for (int i = 0; i < MAX_BLOCKS; i++) {          /* the highest block of that structure */
+        Block *b = &g->blocks[i];
+        if (b->body && b->kind == KIND_BOX && fabsf(b->body->x - near->body->x) < 110.0f && (!tower || b->body->y > tower->body->y)) tower = b;
+    }
+    /* a lob that arrives at the height of that block */
+    float dir = tower->body->x > bb->x ? 1.0f : -1.0f, vx = dir * 820.0f;
+    float t = fmaxf(fabsf(tower->body->x - bb->x) - 90.0f, 120.0f) / 820.0f;
     float vy = (tower->body->y - bb->y - 0.5f * GRAVITY * t * t) / t;
     float vy_max = sqrtf(2.0f * -GRAVITY * fmaxf(CEIL_Y - 70.0f - bb->y, 10.0f));
     bb->vx = vx; bb->vy = bt_clampf(vy, -150.0f, vy_max);

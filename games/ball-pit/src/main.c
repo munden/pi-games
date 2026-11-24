@@ -423,9 +423,11 @@ static void finger_step(int i, const PG_Touch *t)
                 f->pour_cd = 1e9f;
             }
         } else {
-            float vx = (tx - f->body->x) / PG_DT, vy = (ty - f->body->y) / PG_DT, sp = sqrtf(vx * vx + vy * vy);
-            if (sp > FINGER_VMAX) { vx *= FINGER_VMAX / sp; vy *= FINGER_VMAX / sp; }
-            f->body->vx = vx; f->body->vy = vy;
+            float ex = tx - f->body->x, ey = ty - f->body->y, d = sqrtf(ex * ex + ey * ey);
+            float vx = ex / PG_DT, vy = ey / PG_DT, sp = d / PG_DT;
+            if (sp > FINGER_VMAX) { vx *= FINGER_VMAX / sp; vy *= FINGER_VMAX / sp; sp = FINGER_VMAX; }
+            float calm = smooth01((d - 1.5f) / 4.0f);         /* an infrared frame jitters by a pixel or two: a held finger stays still */
+            f->body->vx = vx * calm; f->body->vy = vy * calm;
             f->trail += sp * PG_DT;
             if (f->trail > 70.0f) { f->trail = 0; spark_add(SP_STAR, f->wx, f->wy, 50, pg_rand_range(-40, 40), pg_rand_range(-20, 60), 0.55f, 18, 40.0f + 55.0f * (float)i); }
         }
@@ -685,8 +687,8 @@ static void draw_fx(float tm)
         PG_V3 p = pg_v3(f->wx, f->wy, 0);
         float pulse = 1.0f + 0.05f * sinf(tm * 8.0f + (float)i);
         PG_Color c = pg_hsv(190.0f + 40.0f * (float)i, 0.35f, 1.0f);
-        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.75f), PG3D_ADDITIVE);
-        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.22f), PG3D_ADDITIVE);
+        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.62f), PG3D_ADDITIVE);
+        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.18f), PG3D_ADDITIVE);
         for (int k = 0; k < 3; k++) {
             float a = tm * 2.3f + (float)k * 2.094f + (float)i;
             float sz = 15.0f + 5.0f * sinf(tm * 7.0f + (float)(k * 2 + i));
@@ -696,7 +698,7 @@ static void draw_fx(float tm)
     if (hint_a > 0.02f) {                                  /* the friendly hand: its fingertip is the ghost finger */
         float wig = 0.10f * sinf(tm * 3.1f);
         PG_V3 tip = lift_to_z(pg_v3(hint_x, hint_y, 0), 110.0f);
-        const float S = 86.0f, ox = -4.0f / 64.0f * S, oy = 27.0f / 64.0f * S;          /* sprite centre relative to the fingertip */
+        const float S = 86.0f, ox = 4.0f / 64.0f * S, oy = -27.0f / 64.0f * S;          /* sprite centre relative to the fingertip */
         float cw = cosf(wig), sw = sinf(wig);
         PG_V3 c = pg_v3(tip.x + ox * cw + oy * sw, tip.y - ox * sw + oy * cw, tip.z);
         pg3d_sprite(T.hand, c, S, S, wig, pg_alpha(pg_rgb(255, 255, 255), hint_a), 0);

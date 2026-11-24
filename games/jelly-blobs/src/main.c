@@ -81,13 +81,13 @@ static void giggle(int bi)
     BlobFx *f = &fx[bi];
     if (f->giggle_t > 0.0f) return;
     f->giggle_t = 0.75f;
-    int base = 6 + (int)(1.4f * (pitch_for(bi) - 0.8f) * 3.0f);
+    int base = 5 + (int)(1.4f * (pitch_for(bi) - 0.8f) * 3.0f);
     static const int seq[4] = { 0, 2, 1, 3 };
     int n = 3 + (int)(pg_rand() & 1u);
     for (int k = 0; k < n; k++) {
         float f0 = pg_note_hz(base + seq[k]);
         note_push(4 + k * 5, PG_WAVE_SINE, f0, f0 * 1.18f, 70.0f, 0.26f);
-        note_push(4 + k * 5, PG_WAVE_TRI, f0 * 2.0f, f0 * 2.3f, 50.0f, 0.04f);
+        note_push(4 + k * 5, PG_WAVE_TRI, f0 * 2.0f, f0 * 2.3f, 50.0f, 0.03f);
     }
 }
 
@@ -114,15 +114,15 @@ static int  snd_this_tick;
 static uint32_t last_squish_tick;
 
 /* Every touch must be heard: the SDK's squish is rate limited, so extra simultaneous touches get a soft pentatonic blip. */
-static void touch_sound(int bi)
+static void touch_sound(int bi, float vol)
 {
     if (snd_this_tick >= 4) return;
     if (snd_this_tick == 0 && W.ticks - last_squish_tick >= 4) {
-        pg_sfx_squish(0.55f, pitch_for(bi));
+        pg_sfx_squish(vol, pitch_for(bi));
         last_squish_tick = W.ticks;
     } else {
         float f = pg_note_hz(4 + (bi * 2 + snd_this_tick * 3) % 8);
-        pg_tone(PG_WAVE_SINE, f, f * 1.25f, 85.0f, 0.22f);
+        pg_tone(PG_WAVE_SINE, f, f * 1.25f, 85.0f, vol * 0.4f);
     }
     snd_this_tick++;
 }
@@ -133,9 +133,9 @@ static void touch_blob(int id, int bi, float wx, float wy, float poke)
     soft_grab(&W, id, bi, wx, wy);
     f->blob = bi;
     soft_poke(&W, bi, wx, wy, poke);
-    touch_sound(bi);
+    touch_sound(bi, id == HINT_ID ? 0.28f : 0.55f);
     fx[bi].poke_t = 0.45f;
-    giggle(bi);
+    if (id != HINT_ID) giggle(bi);
     burst(P_HEART, wx, wy, 1, 150.0f, 26.0f, pg_rgb(255, 255, 255));
     burst(P_STAR, wx, wy, 3, 220.0f, 22.0f, art_candy(fx[bi].style));
 }
@@ -264,8 +264,7 @@ static void blob_think(int i)
             if (b->cx > SB_WALL_X - 140) side = -fabsf(side);
             if (b->cx < -SB_WALL_X + 140) side = fabsf(side);
             soft_hop(&W, i, pg_rand_range(380.0f, 470.0f), side);
-            pg_sfx_boing(0.20f, pitch_for(i) * 1.1f);
-            f->hop_t = pg_rand_range(4.0f, 9.0f);
+            f->hop_t = pg_rand_range(6.0f, 14.0f);
         }
     } else if ((f->hop_t -= dt) <= 0) {
         if (b->grounded && b->held == 0 && life_ticks > 150) f->crouch_t = 0.15f;
@@ -362,7 +361,7 @@ static int init(SDL_Renderer *r)
         memset(f, 0, sizeof *f);
         f->style = style[i];
         f->blink_t = pg_rand_range(1.0f, 4.0f);
-        f->hop_t = pg_rand_range(3.5f, 7.0f) + 0.6f * (float)i;
+        f->hop_t = pg_rand_range(4.0f, 9.0f) + 0.9f * (float)i;
         f->wander_t = pg_rand_range(0.2f, 2.0f);
         f->tx = pg_rand_range(-300, 300); f->ty = pg_rand_range(-100, 150);
         f->mouth = FACE_SMILE;
@@ -386,7 +385,7 @@ static void handle_events(void)
         case SE_LAND: {
             BlobFx *f = &fx[e->a];
             if (f->snd_cool <= 0) {
-                pg_sfx_boing(clampf(0.10f + e->speed / 1700.0f, 0.12f, 0.50f), pitch_for(e->a) * pg_rand_range(0.94f, 1.06f));
+                pg_sfx_boing(clampf(0.05f + e->speed / 2200.0f, 0.08f, 0.45f), pitch_for(e->a) * pg_rand_range(0.94f, 1.06f));
                 f->snd_cool = 0.16f;
             }
             f->land_t = 0.45f;

@@ -62,6 +62,9 @@
 #ifndef HELD_GRAV
 #define HELD_GRAV 2.6f             /* ... and heavier, so it droops from the fingertip */
 #endif
+#ifndef BEND_K
+#define BEND_K 0.35f               /* skin smoothing per iteration where the skin is sharper than at rest: no spikes, no folds */
+#endif
 #ifndef REST_THR
 #define REST_THR 90.0f             /* only bounce particles that hit faster than this, px/s */
 #endif
@@ -128,8 +131,9 @@ static void blob_make_rest(SoftBlob *b, float R)
     }
     b->qx[SB_C] = 0; b->qy[SB_C] = 0;
     for (int i = 0; i < SB_N; i++) {
-        int j = (i + 1) % SB_N;
+        int j = (i + 1) % SB_N, h = (i + SB_N - 1) % SB_N;
         b->edge0[i] = sqrtf(sqr(b->qx[j] - b->qx[i]) + sqr(b->qy[j] - b->qy[i]));
+        b->bend0[i] = sqrtf(sqr(0.5f * (b->qx[h] + b->qx[j]) - b->qx[i]) + sqr(0.5f * (b->qy[h] + b->qy[j]) - b->qy[i]));
     }
     b->radius = R;
     b->area0 = area * s * s;
@@ -252,6 +256,21 @@ static void area_constraint(SoftBlob *b, float target)
     float lim = 0.25f * b->radius, gm = sqrtf(gsum / SB_N) + 1e-3f;
     lam = clampf(lam, -lim / gm, lim / gm);
     for (int i = 0; i < SB_N; i++) { b->x[i] += lam * gx[i]; b->y[i] += lam * gy[i]; }
+}
+
+/* A little bending stiffness: where the skin is sharper than at rest (a spike, a fold) pull the particle toward the
+ * midpoint of its neighbours.  The rest shape and gentle wobbles are untouched.  Keeps the centroid. */
+static void skin_smooth(SoftBlob *b)
+{
+    float dx[SB_N], dy[SB_N];
+    for (int i = 0; i < SB_N; i++) {
+        int j = i + 1 == SB_N ? 0 : i + 1, h = i == 0 ? SB_N - 1 : i - 1;
+        float ex = 0.5f * (b->x[h] + b->x[j]) - b->x[i], ey = 0.5f * (b->y[h] + b->y[j]) - b->y[i];
+        float d = sqrtf(ex * ex + ey * ey), over = d - b->bend0[i];
+        float k = over <= 0 ? 0.0f : BEND_K * clampf(over / (0.32f * b->edge0[i]), 0.0f, 1.0f);
+        dx[i] = ex * k; dy[i] = ey * k;
+    }
+    for (int i = 0; i < SB_N; i++) { b->x[i] += dx[i]; b->y[i] += dy[i]; }
 }
 
 static void edge_limits(SoftBlob *b)
@@ -510,6 +529,7 @@ static void substep(SoftWorld *w, float dt)
             shape_match(b, &th);
             b->theta_raw = th;
             area_constraint(b, b->area0 * (1.0f + b->breath));
+            skin_smooth(b);
             edge_limits(b);
         }
         blob_collisions(w);

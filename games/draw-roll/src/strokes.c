@@ -35,7 +35,8 @@ typedef struct {
     uint32_t uid;
     PG_Color color;
     uint32_t stroke;
-    int      prev;
+    int      prev, next;
+    uint32_t prev_uid, next_uid;
     PG_Body *body;
 } Piece;
 
@@ -222,12 +223,12 @@ static Piece *add_piece(Pen *pen, float ax, float ay, float bx, float by)
     p->stroke = pen->stroke;
     p->sph_a = pen->last_piece < 0;
     p->sph_b = true;
-    p->prev = -1;
+    p->prev = p->next = -1;
     if (pen->last_piece >= 0) {
         Piece *q = &pieces[pen->last_piece];
         if (q->state == PS_ALIVE && q->stroke == pen->stroke) {
-            p->prev = pen->last_piece;
-            q->has_next = true;
+            p->prev = pen->last_piece; p->prev_uid = q->uid;
+            q->has_next = true; q->next = (int)(p - pieces); q->next_uid = p->uid;
             float th = acosf(clampf(q->dirx * p->dirx + q->diry * p->diry, -1.0f, 1.0f));
             if (th < SPH_ANGLE) {                           /* smooth bend: mitre the two tubes, no sphere needed */
                 float e = STROKE_R * tanf(th * 0.5f);
@@ -390,6 +391,8 @@ bool strokes_contact(PG_Body *seg)
     if (!p || p->state == PS_FREE) return false;
     bool fresh = p->pulse < 0.35f;
     p->pulse = 1.0f;
+    if (p->prev >= 0 && pieces[p->prev].uid == p->prev_uid && pieces[p->prev].pulse < 0.55f) pieces[p->prev].pulse = 0.55f;   /* the bump spreads a little */
+    if (p->next >= 0 && pieces[p->next].uid == p->next_uid && pieces[p->next].pulse < 0.55f) pieces[p->next].pulse = 0.55f;
     return fresh;
 }
 
@@ -470,10 +473,10 @@ void strokes_render(void)
         float pop = ease_out_back(p->age / 0.22f);
         float vis = pop * p->fade;
         if (vis < 0.03f) continue;
-        float rs = STROKE_R * vis * (1.0f + 0.30f * p->pulse);
+        float rs = STROKE_R * vis * (1.0f + 0.26f * p->pulse);
         float shim = 0.97f + 0.09f * sinf(t * 2.3f - p->phase);
         PG_Color c = col_mul(p->color, shim);
-        if (p->pulse > 0.02f) c = pg_color_lerp(c, pg_rgb(255, 255, 255), 0.55f * p->pulse);
+        if (p->pulse > 0.02f) c = pg_color_lerp(c, pg_rgb(255, 255, 255), 0.38f * p->pulse);
         c.a = (uint8_t)(clampf(p->fade * 1.7f, 0.0f, 1.0f) * 255.0f);
         PG_V3 q = at_depth(p->cx, p->cy, p->z);              /* the layer offset must not move the ramp away from its physics */
         PG_M4 m = place(q.x, q.y, q.z, p->c, p->s, p->hl, rs, rs);

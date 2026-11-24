@@ -21,7 +21,7 @@
 
 static PG_Mesh *m_puff, *m_bucket, *m_rim, *m_inside, *m_eye, *m_ped, *m_pedrim, *m_sponge, *m_quad;
 static PG_Tex   t_cloud, t_bucket, t_rim, t_inside, t_ped, t_sponge;
-static PG_Tex   t_eye, t_pupil, t_cheek, t_smile, t_mouth;
+static PG_Tex   t_eye, t_pupil, t_cheek, t_smile, t_mouth, t_shut;
 
 static struct {
     float t;
@@ -70,6 +70,11 @@ static void paint_face_sheet(void)
     /* open mouth (48,32) 32x32 with tongue */
     pg_img_disc(im, 64, 46, 12.6f, PG_RGB24(0x9A1E48));
     pg_img_disc(im, 64, 53, 7.2f, PG_RGB24(0xFF7C9C));
+    /* happy closed eye (80,32): an upside-down smile */
+    for (int k = 0; k < 10; k++) {
+        float t0 = (float)k / 10.0f, t1 = (float)(k + 1) / 10.0f;
+        pg_img_line(im, 80.0f + 5.0f + 22.0f * t0, 32.0f + 23.0f - 14.0f * 4.0f * t0 * (1.0f - t0), 80.0f + 5.0f + 22.0f * t1, 32.0f + 23.0f - 14.0f * 4.0f * t1 * (1.0f - t1), 3.8f, PG_RGB24(0x3A2F7A));
+    }
     /* flatten the top: a "D"-shaped mouth */
     for (int j = 32; j < 43; j++) for (int i = 48; i < 80; i++) im->px[j * 128 + i] = 0x00FFFFFFu;
     PG_Tex sheet = tex_finish(im, true);
@@ -78,6 +83,7 @@ static void paint_face_sheet(void)
     t_cheek = tex_sub(sheet, 128, 64, 64, 0, 32, 32);
     t_smile = tex_sub(sheet, 128, 64, 0, 32, 48, 24);
     t_mouth = tex_sub(sheet, 128, 64, 48, 32, 32, 32);
+    t_shut  = tex_sub(sheet, 128, 64, 80, 32, 32, 32);
 }
 
 static PG_Tex paint_cloud(void)
@@ -302,14 +308,16 @@ static void draw_cloud(void)
     float fz = 62.0f;
     bool blink = T.blink > 0.0f;
     float happy = clampf(T.disp_open * 1.6f, 0.0f, 1.0f);
-    float eye_h = blink ? 0.12f : 1.0f - 0.65f * happy;
     float lx = clampf((T.pupil_x - disp_x()) * 0.02f, -1.0f, 1.0f), ly = clampf((T.pupil_y - DISP_Y) * 0.02f, -1.0f, 1.0f);
+    bool shut = blink || happy > 0.5f;
     for (int s = -1; s <= 1; s += 2) {
         PG_V3 e = pg_m4_apply(&G, pg_v3(22.0f * (float)s, 10.0f, fz));
-        pg3d_sprite(t_eye, e, 25.0f, 29.0f * eye_h, 0, pg_rgb(255, 255, 255), 0);
-        if (eye_h > 0.5f) {
+        if (shut) {
+            pg3d_sprite(t_shut, pg_v3(e.x, e.y + 2.0f, e.z + 1.0f), 24.0f, 20.0f, 0, pg_rgb(255, 255, 255), 0);
+        } else {
+            pg3d_sprite(t_eye, e, 25.0f, 29.0f, 0, pg_rgb(255, 255, 255), 0);
             PG_V3 p = pg_m4_apply(&G, pg_v3(22.0f * (float)s + lx * 4.0f, 10.0f + ly * 5.0f, fz + 1.5f));
-            pg3d_sprite(t_pupil, p, 14.0f, 14.0f * (0.5f + 0.5f * eye_h), 0, pg_rgb(255, 255, 255), 0);
+            pg3d_sprite(t_pupil, p, 14.0f, 14.0f, 0, pg_rgb(255, 255, 255), 0);
         }
         PG_V3 ch = pg_m4_apply(&G, pg_v3(41.0f * (float)s, -8.0f, fz - 3.0f));
         pg3d_sprite(t_cheek, ch, 26.0f, 22.0f, 0, pg_rgba(255, 255, 255, 235), 0);
@@ -337,13 +345,18 @@ static void draw_bucket(void)
     float dl = sqrtf(dx * dx + dy * dy) + 1e-3f, off = fminf(7.5f, dl * 0.05f);
     for (int s = -1; s <= 1; s += 2) {
         float ex = 40.0f * (float)s, ey = -199.0f, ez = 40.0f;
-        m = pg_m4_mul(G, pg_m4_trs2(ex, ey, ez, 0, 19.0f, 19.0f * blink, 19.0f));
-        pg3d_mesh(m_eye, t_eye, &m, pg_rgb(255, 255, 255), 0);
-        if (blink > 0.5f) {
-            float ox = (T.pupil_x - ex) / dl * off, oy = (T.pupil_y - ey) / dl * off;
-            PG_V3 p = pg_m4_apply(&G, pg_v3(ex + ox, ey + oy, ez + 19.6f));
-            pg3d_sprite(t_pupil, p, 15.5f, 15.5f, 0, pg_rgb(255, 255, 255), 0);
+        if (blink < 0.5f) {
+            PG_V3 p = pg_m4_apply(&G, pg_v3(ex, ey + 1.0f, ez + 19.0f));
+            pg3d_sprite(t_shut, p, 34.0f, 28.0f, 0, pg_rgb(255, 255, 255), 0);
+            continue;
         }
+        m = pg_m4_mul(G, pg_m4_trs2(ex, ey, ez, 0, 19.0f, 19.0f, 19.0f));
+        pg3d_mesh(m_eye, pg3d_white(), &m, pg_rgb(255, 255, 255), 0);
+        PG_V3 c = pg_m4_apply(&G, pg_v3(ex, ey, ez));
+        pg3d_shine(c, 19.0f, 0.55f);
+        float ox = (T.pupil_x - ex) / dl * off, oy = (T.pupil_y - ey) / dl * off;
+        PG_V3 p = pg_m4_apply(&G, pg_v3(ex + ox, ey + oy, ez + 19.6f));
+        pg3d_sprite(t_pupil, p, 15.5f, 15.5f, 0, pg_rgb(255, 255, 255), 0);
     }
 }
 

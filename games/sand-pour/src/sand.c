@@ -245,8 +245,8 @@ int sand_pour(float x0, float y0, float x1, float y1, int hue, int n)
         cx = cx < 0 ? 0 : cx >= SD_W ? SD_W - 1 : cx;
         cy = cy < 1 ? 1 : cy >= SD_H - SD_PLANK ? SD_H - SD_PLANK - 1 : cy;
         int id = 1 + hue * 4 + (int)(rnd() & 3u);
-        /* if the spot is taken (pile or peg) nudge up a cell or two: a nozzle that is buried simply stops pouring */
-        for (int up = 0; up < 3 && cy - up >= 1; up++)
+        /* if the spot is taken (pile or peg) the sand comes out just above the surface, so a buried finger still pours */
+        for (int up = 0; up < 9 && cy - up >= 1; up++)
             if (spawn_cell(cx + 1, cy - up + 1, id)) { made++; break; }
     }
     return made;

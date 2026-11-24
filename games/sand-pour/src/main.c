@@ -62,6 +62,7 @@ static void fx_burst(PG_V3 p, float hue, int n, float speed)
 }
 
 static bool in_win(float x, float y) { return x >= (float)win_rx && x < (float)(win_rx + SD_PX_W) && y >= (float)win_ry && y < (float)(win_ry + SD_PX_H); }
+static bool in_gate(float x, float y) { return y < 100.0f && (x < 100.0f || x > (float)PG_W - 100.0f); }   /* the parent's exit corners: never used */
 static bool hit_button(float x, float y) { float dx = x - btn_sx, dy = y - btn_sy, r = btn_r + 14.0f; return dx * dx + dy * dy <= r * r; }
 
 static void chime(int step, float vol)
@@ -139,7 +140,8 @@ static void touches(void)
                 hue_counter += 137.5f + pg_rand_range(-12, 12);
                 PG_V3 p;
                 if (pg3d_plane_z(x, y, 70, &p)) fx_burst(p, f->hue, 5, 130.0f);
-                if (in_win(x, y)) pg_sfx_chime(hue_index(f->hue) % 5 + 3, 0.35f);
+                if (in_win(x, y) && !in_gate(x, y)) pg_sfx_chime(hue_index(f->hue) % 5 + 3, 0.35f);
+                else if (in_gate(x, y)) pg_sfx_chime(2, 0.25f);
                 else {
                     int hit = -1; float best = 1e9f;
                     for (int k = 0; k < P_COUNT; k++) {
@@ -152,7 +154,7 @@ static void touches(void)
             }
         }
         if (f->btn || !f->on) continue;
-        if (in_win(x, y)) {
+        if (in_win(x, y) && !in_gate(x, y)) {
             pouring++;
             const float cx = (x - (float)win_rx) / (float)SD_CELL, cy = (y + 10.0f - (float)win_ry) / (float)SD_CELL;
             if (!f->has_last) { f->lx = cx; f->ly = cy; f->has_last = true; }
@@ -397,7 +399,7 @@ static void draw_crate_and_button(float tm)
     float glow = 0.20f + 0.10f * sinf(tm * 3.0f) + 0.4f * bump;
     pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), gp, 180, 180, 0, pg_rgba(255, 110, 90, (uint8_t)(clampf(glow, 0, 1) * 255.0f)), PG3D_ADDITIVE);
     float sx, sy, d, sx2, sy2;
-    if (pg3d_project(pg_v3(cxw, cyb, zcap + 9.0f), &sx, &sy, &d) && pg3d_project(pg_v3(cxw + 45.0f, cyb, zcap + 9.0f), &sx2, &sy2, &d)) {
+    if (pg3d_project(pg_v3(cxw, cyb, zcap + 9.0f), &sx, &sy, &d) && pg3d_project(pg_v3(cxw + 47.0f, cyb, zcap + 9.0f), &sx2, &sy2, &d)) {
         btn_sx = sx; btn_sy = sy; btn_r = sx2 - sx;
     }
 }
