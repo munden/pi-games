@@ -403,6 +403,26 @@ static PG_Mesh *mesh_frustum(float rb, float rt, float hh, int segs)
     return bld_done(&b);
 }
 
+/* the button cap: a round face carrying the picture, and plain red sides (the sides sample a flat red spot of the picture) */
+static PG_Mesh *mesh_button_cap(float r, float hh, int segs)
+{
+    Bld b = bld_new(segs + 2 + (segs + 1) * 2, segs * 3 + segs * 6);
+    int c = bld_v(&b, pg_v3(0, hh, 0), pg_v3(0, 1, 0), 0.5f, 0.5f), first = b.nv;
+    for (int i = 0; i <= segs; i++) {
+        float a = PG_TAU * (float)i / (float)segs;
+        bld_v(&b, pg_v3(r * cosf(a), hh, r * sinf(a)), pg_v3(0, 1, 0), 0.5f + 0.5f * 0.97f * cosf(a), 0.5f + 0.5f * 0.97f * sinf(a));
+    }
+    for (int i = 0; i < segs; i++) bld_t(&b, c, first + i, first + i + 1);
+    int side = b.nv;
+    for (int i = 0; i <= segs; i++) {
+        float a = PG_TAU * (float)i / (float)segs, cs = cosf(a), sn = sinf(a);
+        bld_v(&b, pg_v3(r * cs, hh, r * sn), pg_v3(cs, 0, sn), 0.10f, 0.50f);
+        bld_v(&b, pg_v3(r * cs, -hh, r * sn), pg_v3(cs, 0, sn), 0.10f, 0.50f);
+    }
+    for (int i = 0; i < segs; i++) { int a = side + i * 2; bld_t(&b, a, a + 1, a + 3); bld_t(&b, a, a + 3, a + 2); }
+    return bld_done(&b);
+}
+
 static PG_Mesh *mesh_disc(float r, int segs)         /* flat fan facing +y */
 {
     Bld b = bld_new(segs + 2, segs * 3);
@@ -478,7 +498,7 @@ void art_init(void)
     A.leaf_m = mesh_leaf(112.0f, 24.0f, 34.0f);
     A.coconut_m = pg_mesh_sphere(8.0f, 12, 8);
     A.crate_m = pg_mesh_bevel_box(62.0f, 58.0f, 42.0f, 11.0f);
-    A.btn_cap = pg_mesh_cylinder(47.0f, 9.0f, 24);
+    A.btn_cap = mesh_button_cap(47.0f, 9.0f, 24);
     A.btn_ring = pg_mesh_cylinder(55.0f, 5.0f, 24);
     A.ball_m = pg_mesh_sphere(30.0f, 14, 10);
     A.bucket_m = mesh_frustum(21.0f, 29.0f, 24.0f, 14);

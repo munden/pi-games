@@ -40,6 +40,23 @@ static float rnd(void)
 static float hx(int side, int i) { return side ? -HX[NH - 1 - i] : HX[i]; }
 static float hy(int side, int i) { return side ? HY[NH - 1 - i] : HY[i]; }
 
+/* declared in scene.h */
+bool scene_hill_probe(float x, float *y, float *slope)
+{
+    int side = x < 0 ? 0 : 1;
+    float ax = fabsf(x);
+    if (ax < MOUTH_X || ax > WALL_IN_X) return false;
+    for (int i = 0; i + 1 < NH; i++) {
+        float x0 = hx(side, i), x1 = hx(side, i + 1);
+        if (x >= x0 && x <= x1) {
+            *y = lerpf(hy(side, i), hy(side, i + 1), (x - x0) / (x1 - x0));
+            *slope = atan2f(hy(side, i + 1) - hy(side, i), x1 - x0);
+            return true;
+        }
+    }
+    return false;
+}
+
 static float hill_surface(int side, float x)
 {
     for (int i = 0; i + 1 < NH; i++) {

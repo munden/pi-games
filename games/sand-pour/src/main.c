@@ -64,9 +64,12 @@ static bool in_win(float x, float y) { return x >= (float)win_rx && x < (float)(
 static bool in_gate(float x, float y) { return y < 100.0f && (x < 100.0f || x > (float)PG_W - 100.0f); }   /* the parent's exit corners: never used */
 static bool hit_button(float x, float y) { float dx = x - btn_sx, dy = y - btn_sy, r = btn_r + 14.0f; return dx * dx + dy * dy <= r * r; }
 
+/* nobody has touched the screen for 15 s: the show goes on but silently (a toy left on must not chime all night) */
+static bool attended(void) { return idle_ticks < 900; }
+
 static bool chime(int step, float vol)             /* at most one every 16 ticks, so piles growing everywhere stay calm */
 {
-    if ((int)pg_ticks() - chime_last < 16) return false;
+    if (!attended() || (int)pg_ticks() - chime_last < 16) return false;
     chime_last = (int)pg_ticks();
     pg_sfx_chime(step, vol);
     return true;
@@ -176,7 +179,7 @@ static void touches(void)
         }
     }
     if (pouring && (++shh_t % 4) == 0)
-        pg_tone(PG_WAVE_NOISE, 1900.0f, 950.0f, 260.0f, 0.045f + 0.01f * (float)(pouring > 5 ? 5 : pouring));
+        pg_tone(PG_WAVE_NOISE, 1900.0f, 950.0f, 260.0f, 0.065f + 0.012f * (float)(pouring > 5 ? 5 : pouring));
     if (!pouring) shh_t = 0;
 }
 
@@ -205,7 +208,7 @@ static void door_logic(void)
 {
     const int st = sand_door_state();
     if (st == SAND_DOOR_CLOSED) {
-        if (door_prev != SAND_DOOR_CLOSED) pg_sfx_thud(0.3f);
+        if (door_prev != SAND_DOOR_CLOSED && attended()) pg_sfx_thud(0.3f);
         if (cooldown_auto > 0) cooldown_auto--;
         else {
             float fill = sand_fill();
@@ -213,7 +216,7 @@ static void door_logic(void)
             if (fill > 0.84f || ceil_ticks > 100 || peak_h >= 74) {
                 float close_at = fill > 0.84f ? 0.55f : fmaxf(0.04f, fill - 0.12f);
                 sand_door_open((float)peak_x + 0.5f, fill > 0.92f ? 12.0f : 3.0f, 0.12f, 150, close_at);
-                pg_sfx_whoosh(0.22f);
+                if (attended()) pg_sfx_whoosh(0.22f);
                 cooldown_auto = 600;
             }
         }
@@ -234,7 +237,7 @@ static void scan_piles(void)
     for (int g = 0; g < SD_GROUPS; g++) {
         int band = h[g] / 10;
         if (band > rec_band[g]) {
-            if (chime(band - 1 > 9 ? 9 : band - 1, 0.45f))   /* ...and a little shower of stars at the top of the pile that just grew */
+            if (chime(band - 1 > 9 ? 9 : band - 1, 0.55f))   /* ...and a little shower of stars at the top of the pile that just grew */
                 fx_burst(pg_v3(WX0 + ((float)hx[g] + 0.5f) * (float)SD_CELL, WYT - ((float)(SD_H - SD_PLANK - 1 - h[g]) + 0.5f) * (float)SD_CELL + 6.0f, 62.0f),
                          (float)band * 38.0f, 6, 120.0f);
             rec_band[g] = band;
@@ -250,6 +253,8 @@ static void fx_update(void)
         f->life -= PG_DT;
         if (f->kind == 0) f->v.y -= 300.0f * PG_DT;
         f->p = pg_v3_add(f->p, pg_v3_scale(f->v, PG_DT));
+        /* confetti that falls onto the floor of the box fades out there instead of dropping through the frame */
+        if (f->kind == 0 && f->p.y < WYB + 6.0f && f->p.y > WYB - 40.0f && f->p.x > WX0 && f->p.x < WX1 && f->life > 0.12f) f->life = 0.12f;
     }
     for (int i = 0; i < P_COUNT; i++) pokes[i].t = fmaxf(0.0f, pokes[i].t - PG_DT * 1.5f);
 }
@@ -481,7 +486,7 @@ static void draw_fx_and_fingers(float tm)
             PG_Color c = pg_hsv(f->hue, 0.5f, 1.0f);
             PG_V3 p = f->p; p.z = fmaxf(p.z, 60.0f);
             pg3d_sprite(pg3d_builtin(PG3D_TEX_STAR), p, f->size * a, f->size * a, f->rot + f->life * 3.0f, c, 0);
-            pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), p, f->size * 2.0f * a, f->size * 2.0f * a, 0, pg_alpha(c, 0.55f), PG3D_ADDITIVE);
+            pg3d_sprite(pg3d_builtin(PG3D_TEX_GLOW), p, f->size * 1.8f * a, f->size * 1.8f * a, 0, pg_alpha(c, 0.36f), PG3D_ADDITIVE);
         } else {
             PG_Color c = pg_hsv(f->hue, 0.25f, 1.0f);
             float s = f->size * (1.6f - k * 0.9f);

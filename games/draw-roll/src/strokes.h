@@ -21,6 +21,7 @@ void strokes_pen_set_ttl(int pen, float seconds);                   /* this stro
 int  strokes_next_color(void);                                      /* next palette index not used by another pen */
 PG_Color strokes_palette(int idx);
 
+void strokes_melt(int n);                    /* the n oldest pieces start to thin out and fade (idle clean-up) */
 void strokes_wipe(void);                     /* wash everything away: debris + sparkles, bodies removed at once */
 bool strokes_contact(PG_Body *seg);          /* a ball hit this piece: it lights up and bulges; true if it was not already glowing */
 int  strokes_count(void);                    /* alive (not fading) pieces */

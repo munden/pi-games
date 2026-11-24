@@ -118,12 +118,7 @@ void fx_prize(PG_V3 p)
     float sx, sy, wx = p.x, wy = p.y;
     if (cam_project(p.x, p.y, p.z, &sx, &sy)) cam_unproject(sx, sy, PRIZE_Z, &wx, &wy);   /* same spot on screen, nearer the camera */
     p = pg_v3(wx, wy, PRIZE_Z);
-#ifdef BP_DEBUG
-    static int dbg_kind;                                         /* dev only: cycle the kinds so each can be inspected */
-    z->kind = getenv("BP_PRIZES") ? dbg_kind++ % 3 : pg_rand_int(0, 2);
-#else
     z->kind = pg_rand_int(0, 2);
-#endif
     z->on = true; z->p = p; z->life = 3.6f; z->ph = frand(0, PG_TAU); z->spin = frand(0, PG_TAU);
     prize_cd = 0.25f;
     fx_burst(p, 50.0f, 10, 260.0f);

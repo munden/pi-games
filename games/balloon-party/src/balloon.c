@@ -298,22 +298,6 @@ static int count_active(void)
 int balloons_count(void) { return count_active(); }
 int balloon_slots(void) { return MAX_BALLOONS; }
 
-#ifdef BP_DEBUG
-void balloons_debug_dump(void)
-{
-    int vis = 0;
-    for (int i = 0; i < MAX_BALLOONS; i++) {
-        float sx, sy, sr;
-        if (B[i].alive && balloon_screen(i, &sx, &sy, &sr) && sy - sr < 540.0f) vis++;
-    }
-    pg_log("  visible=%d", vis);
-    for (int i = 0; i < MAX_BALLOONS; i++) {
-        float sx, sy, sr;
-        if (getenv("BP_DUMP_ALL") && B[i].alive && balloon_screen(i, &sx, &sy, &sr))
-            pg_log("  b%02d col=%d at (%.0f,%.0f) sr=%.0f z=%.0f v=(%.0f,%.0f) fh=%.2f%s", i, B[i].col, sx, sy, sr, B[i].z, B[i].vx, B[i].vy, B[i].float_h, B[i].retiring ? " retiring" : "");
-    }
-}
-#endif
 
 void balloons_update(float t)
 {
@@ -581,11 +565,7 @@ void balloon_pop(int i)
         o->vx += dx / d * push; o->vy += dy / d * push; o->vz += dz / d * push * 0.5f;
         kick(o, dx, dy, -3.0f * w);
     }
-#ifdef BP_DEBUG
-    if (getenv("BP_PRIZES") || pg_randf() < 0.20f) fx_prize(p);     /* dev only: BP_PRIZES=1 releases a prize from every pop */
-#else
-    if (pg_randf() < 0.20f) fx_prize(p);
-#endif
+    if (pg_randf() < 0.20f) fx_prize(p);                          /* now and then: a surprise */
     b->alive = false;
     if (spawn_cd > 0.5f) spawn_cd = frand(0.3f, 0.7f);
 }

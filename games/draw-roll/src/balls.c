@@ -7,6 +7,7 @@
  */
 #include "balls.h"
 #include "fx.h"
+#include "scene.h"
 #include "toys.h"
 
 #include <string.h>
@@ -256,6 +257,18 @@ void balls_render_shadows(void)
     }
 }
 
+/* a soft contact shadow where a ball rolls on a hill, so it sits on the grass instead of floating in front of it */
+static void hill_shadow(const Ball *b, float R)
+{
+    float hy, slope;
+    if (!scene_hill_probe(b->x, &hy, &slope)) return;
+    float gap = (b->y - R) - hy;
+    if (gap > 34.0f) return;
+    float k = 1.0f - clampf(gap, 0.0f, 34.0f) / 34.0f;
+    PG_V3 p = at_depth(b->x, hy - 3.0f, -3.0f);         /* just in front of the hill's front face */
+    pg3d_sprite(pg3d_builtin(PG3D_TEX_SHADOW), p, R * 2.6f, R * 0.9f, slope, pg_rgba(8, 40, 25, (uint8_t)(200.0f * k)), 0);
+}
+
 void balls_render(void)
 {
     for (int i = 0; i < SLOTS; i++) {
@@ -271,6 +284,7 @@ void balls_render(void)
             m = pg_m4_mul(pg_m4_rot_z(b->sq_ang), m);
         }
         m = pg_m4_mul(pg_m4_translate(b->x, b->y, 0.0f), m);
+        if (b->state == B_ALIVE) hill_shadow(b, R);
         pg3d_mesh(m_ball, t_pat[b->pattern], &m, pg_rgb(255, 255, 255), 0);
         pg3d_shine(pg_v3(b->x, b->y, 0.0f), R, 0.85f);
     }

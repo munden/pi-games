@@ -41,7 +41,6 @@ float sand_door_center(void);                       /* cells */
 
 enum { SAND_DOOR_CLOSED, SAND_DOOR_OPENING, SAND_DOOR_OPEN, SAND_DOOR_CLOSING };
 
-int   sand_count(void);                             /* grains in the box */
 float sand_fill(void);                              /* 0..1 of the free space */
 int   sand_ceiling(void);                           /* settled grains in the top rows (box choking) */
 
@@ -52,9 +51,6 @@ void  sand_scan(int heights[SD_GROUPS], int top_x[SD_GROUPS], int *peak_x);
 /* a sample of the grains that left through the floor during the last sand_step: hue index and box column */
 int   sand_drained(int *hues, int *cols, int max);
 
-/* colour of a hue index for sprites/particles */
-uint32_t sand_hue_argb(int hue);
-
 /* relight changed chunks, upload, and draw the window texture with its top-left at (dx,dy) canvas px */
 void  sand_draw(SDL_Renderer *r, int dx, int dy);
 
@@ -63,8 +59,5 @@ int   sand_land_row(int col, int from_row);
 
 /* smoothed CPU ms per tick spent here (sim + relight): lets the game ease off pouring if the device struggles */
 float sand_cpu_ms(void);
-
-/* timing summary, logged once at shutdown */
-void  sand_stats_reset(void);
 
 #endif

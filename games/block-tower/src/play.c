@@ -163,7 +163,7 @@ static Ghost *ghost_alloc(Game *g)
 }
 
 /* ------------------------------------------------------------- the layout */
-enum { R_COLUMN, R_PYR3, R_PYR4, R_GATE, R_STAIRS, R_DOMINO, R_TOWER, R_COUNT };
+enum { R_COLUMN, R_PYR2, R_PYR3, R_PYR4, R_GATE, R_STAIRS, R_DOMINO, R_TOWER, R_COUNT };
 static const uint8_t WIDTH_ORDER[5] = { T_LONG, T_FLAT, T_CUBE, T_TALL, T_SMALL };      /* wide to narrow */
 
 static float plan_add(Plan *pl, int type, int skin, float x, float y_bottom, int level, int group)
@@ -176,21 +176,20 @@ static float plan_add(Plan *pl, int type, int skin, float x, float y_bottom, int
     return p->y + s->hy;
 }
 
-static float recipe_column(Plan *pl, float cx, int group)
+/* The recipes build one structure centred on cx; plan_layout() reserves the width listed for each in its table. */
+static void recipe_column(Plan *pl, float cx, int group)
 {
-    float top = FLOOR_Y, target = pg_rand_range(250, 330), hw = 0;
+    float top = FLOOR_Y, target = pg_rand_range(250, 330);
     float r = pg_randf();
     int idx = r < 0.12f ? 0 : r < 0.5f ? 1 : 2;
     for (int lvl = 0; top - FLOOR_Y < target && lvl < 7; lvl++) {
         int type = WIDTH_ORDER[idx];
         top = plan_add(pl, type, rand_skin(type), cx + pg_rand_range(-3, 3), top, lvl, group);
-        hw = fmaxf(hw, bt_shape(type)->hx);
         if (pg_randf() < 0.45f && idx < 4) idx++;
     }
-    return hw;
 }
 
-static float recipe_pyramid(Plan *pl, float cx, int base, int group)
+static void recipe_pyramid(Plan *pl, float cx, int base, int group)
 {
     float top = FLOOR_Y;
     for (int r = 0; r < base; r++) {
@@ -200,10 +199,9 @@ static float recipe_pyramid(Plan *pl, float cx, int base, int group)
             row_top = plan_add(pl, T_CUBE, rand_skin(T_CUBE), cx + ((float)i - (float)(n - 1) * 0.5f) * 80.7f, top, r, group);
         top = row_top;
     }
-    return (float)base * 40.4f;
 }
 
-static float recipe_gate(Plan *pl, float cx, int group)
+static void recipe_gate(Plan *pl, float cx, int group)
 {
     float top = FLOOR_Y;
     for (int lvl = 0; lvl < 2; lvl++) {
@@ -215,45 +213,47 @@ static float recipe_gate(Plan *pl, float cx, int group)
     int topper = pg_rand_int(0, 2);
     if (topper == 1) plan_add(pl, T_CUBE, rand_skin(T_CUBE), cx, roof, 3, group);
     else if (topper == 2) { plan_add(pl, T_SMALL, rand_skin(T_SMALL), cx - 42, roof, 3, group); plan_add(pl, T_SMALL, rand_skin(T_SMALL), cx + 42, roof, 3, group); }
-    return 102.0f;
 }
 
-static float recipe_stairs(Plan *pl, float cx, int group)
+static void recipe_stairs(Plan *pl, float cx, int group)
 {
     for (int col = 0; col < 3; col++) {
         float top = FLOOR_Y;
         for (int lvl = 0; lvl <= col; lvl++) top = plan_add(pl, T_CUBE, rand_skin(T_CUBE), cx + (float)(col - 1) * 80.7f, top, lvl, group);
     }
-    return 121.0f;
 }
 
-static float recipe_dominoes(Plan *pl, float cx, int group)
+static void recipe_dominoes(Plan *pl, float cx, int group)
 {
     int s0 = pg_rand_int(0, N_TALL_SKINS - 1);
     for (int i = 0; i < 4; i++) plan_add(pl, T_TALL, (s0 + i) % N_TALL_SKINS, cx + ((float)i - 1.5f) * 92.0f, FLOOR_Y, 0, group);
-    return 168.0f;
 }
 
-static float recipe_tower(Plan *pl, float cx, int group)
+static void recipe_tower(Plan *pl, float cx, int group)
 {
     float top = FLOOR_Y;
     int s0 = pg_rand_int(0, N_TALL_SKINS - 1);
     top = plan_add(pl, T_TALL, s0, cx, top, 0, group);
     top = plan_add(pl, T_TALL, (s0 + 1) % N_TALL_SKINS, cx + pg_rand_range(-3, 3), top, 1, group);
     plan_add(pl, T_SMALL, rand_skin(T_SMALL), cx, top, 2, group);
-    return 30.0f;
 }
 
 static void plan_layout(Plan *pl)
 {
-    static const float width[R_COUNT] = { 160, 242, 323, 205, 242, 336, 62 };
+    static const float width[R_COUNT] = { 160, 163, 242, 323, 205, 242, 336, 62 };       /* room each recipe needs */
+    static const float weight[R_COUNT] = { 3, 3, 3, 1, 3, 2, 1, 2 };                      /* how often it is picked */
     static const float x0 = -WALL_X + 140.0f, x1 = CHEST_X - CHEST_HX - 18.0f;     /* zone between the left ball and the chest */
     pl->n = 0;
-    int pick[3] = { R_TOWER, R_COLUMN, R_STAIRS }, np = 0;
-    for (int attempt = 0; attempt < 12 && np < 3; attempt++) {         /* a random set of three that fits, if there is one */
+    int pick[3] = { R_TOWER, R_COLUMN, R_GATE }, np = 0;
+    for (int attempt = 0; attempt < 3 && np < 3; attempt++) {          /* weighted random picks that fit; keep the fullest set */
+        float key[R_COUNT];
         int order[R_COUNT], cand[3], nc = 0;
-        for (int i = 0; i < R_COUNT; i++) order[i] = i;
-        for (int i = R_COUNT - 1; i > 0; i--) { int j = pg_rand_int(0, i), t = order[i]; order[i] = order[j]; order[j] = t; }
+        for (int i = 0; i < R_COUNT; i++) { order[i] = i; key[i] = powf(pg_randf() + 1e-6f, 1.0f / weight[i]); }
+        for (int i = 1; i < R_COUNT; i++) {                              /* highest key first */
+            int ti = order[i], j = i - 1;
+            while (j >= 0 && key[order[j]] < key[ti]) { order[j + 1] = order[j]; j--; }
+            order[j + 1] = ti;
+        }
         float sum = 0;
         for (int i = 0; i < R_COUNT && nc < 3; i++) {
             float w = width[order[i]];
@@ -269,6 +269,7 @@ static void plan_layout(Plan *pl)
         float w = width[pick[k]], c = cx + w * 0.5f;
         switch (pick[k]) {
         case R_COLUMN:  recipe_column(pl, c, k); break;
+        case R_PYR2:    recipe_pyramid(pl, c, 2, k); break;
         case R_PYR3:    recipe_pyramid(pl, c, 3, k); break;
         case R_PYR4:    recipe_pyramid(pl, c, 4, k); break;
         case R_GATE:    recipe_gate(pl, c, k); break;
@@ -564,17 +565,18 @@ static void finger_down(Game *g, Finger *f, const PG_Touch *t)
         f->mode = F_GRAB; f->blk = b; f->lx = lx; f->ly = ly;
         b->holders++;
         b->squash_v += 1.6f;
-        pg_sfx_tap(0.3f);
+        pg_sfx_tap(0.22f);                                         /* every block rings its own friendly pentatonic note */
+        pg_sfx_chime(1 + (int)(b->kind == KIND_BALL ? 3u : (unsigned)(b->type * 3 + b->skin * 2) % 8u), 0.26f);
         fx_stars(g, wx, wy, 60, 3, 90, 16);
     } else {
-        f->mode = F_PUSH;
-        drop_block(g, wx);
+        f->mode = F_PUSH;                 /* the block itself drops when the finger lifts, unless this turns into a sweep */
         tap_feedback(g, wx, wy);
     }
 }
 
 static void finger_release(Game *g, Finger *f, const PG_Touch *t)
 {
+    if (f->mode == F_PUSH && t && !f->moved) drop_block(g, f->wx);
     if (f->mode == F_GRAB && f->blk && f->blk->body) {
         Block *b = f->blk;
         if (b->holders) b->holders--;
@@ -597,7 +599,8 @@ static void finger_held(Game *g, Finger *f, const PG_Touch *t)
     float wx, wy;
     if (touch_world(t, &wx, &wy)) { f->wx = wx; f->wy = wy; }
     if (f->mode == F_GRAB && (!f->blk || !f->blk->body)) f->mode = F_DEAD;
-    if (f->mode == F_PUSH && !f->pad && hypotf(t->x - t->sx, t->y - t->sy) > 12.0f) {
+    if (f->mode == F_PUSH && !f->moved && hypotf(t->x - t->sx, t->y - t->sy) > 12.0f) {
+        f->moved = 1;
         f->pad = pg_world_add_circle(g->w, f->wx, f->wy, PAD_R, 0);
         if (f->pad) { f->pad->tag = TAG_PAD; f->pad->restitution = 0.1f; f->pad->friction = 0.3f; }
     }

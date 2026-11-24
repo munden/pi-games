@@ -16,8 +16,8 @@ void snd_pop(int col, float sizek)
 {
     (void)sizek;
     float g = gain();
-    pg_sfx_pop(0.62f * g);
-    if (load < 6.5f) {
+    pg_sfx_pop(0.58f * g);
+    if (load < 3.5f) {                          /* at most about four bell notes ring together */
         float f = pg_note_hz(col);
         pg_tone(PG_WAVE_BELL, f, f, 1000.0f, 0.46f * g);
     }

@@ -26,7 +26,13 @@ static PG_World *world;
 static TouchInfo ti[PG_MAX_TOUCH];
 static float     load_ms, degrade;           /* my own CPU cost per frame (update + submit + pg3d), smoothed */
 static double    upd_ms;
+#ifndef DR_MELT_AFTER
+#define DR_MELT_AFTER 150.0f                   /* seconds of quiet before the ramps start to melt away (overridable for tests) */
+#endif
+static float     idle_s, empty_s;            /* seconds without any touch / without any ramp on the screen */
 static bool      software_raster;            /* headless: the CPU also rasterises, so pg_frame_ms() says nothing about the Pi */
+
+static void housekeeping(bool any_active);
 
 static double now_ms(void) { return (double)SDL_GetPerformanceCounter() * 1000.0 / (double)SDL_GetPerformanceFrequency(); }
 
@@ -138,6 +144,26 @@ static void handle_touches(void)
         else                                touch_up(i, p, ok ? &w : NULL);
     }
     hint_update(any_down, any_active);
+    housekeeping(any_active);
+}
+
+/* the starter ramp: a gentle S under the cloud that ends above one of the bucket's lips (mirrored at random) */
+static void starter_ramp(bool mirror)
+{
+    static const float first[] = { -210, 88, -130, 74, -50, 48, 30, 8, 90, -38, 132, -80 };
+    float pts[12];
+    for (int i = 0; i < 6; i++) { pts[i * 2] = mirror ? -first[i * 2] : first[i * 2]; pts[i * 2 + 1] = first[i * 2 + 1]; }
+    strokes_add_line(pts, 6, strokes_next_color());
+}
+
+/* the toy tidies itself: after a long quiet time the ramps melt away one by one, and whenever the screen has been
+ * empty for a moment (after the sponge, or after the melt) a fresh starter ramp grows in, so there is always something to see */
+static void housekeeping(bool any_active)
+{
+    if (any_active) idle_s = 0.0f; else idle_s += PG_DT;
+    if (idle_s > DR_MELT_AFTER && strokes_count() > 0 && (pg_ticks() % 15) == 0) strokes_melt(4);
+    empty_s = (strokes_count() == 0 && !any_active) ? empty_s + PG_DT : 0.0f;
+    if (empty_s > 2.5f) { starter_ramp((pg_rand() & 1u) != 0); empty_s = 0.0f; idle_s = 0.0f; }   /* the new ramp gets its full time */
 }
 
 /* ----------------------------------------------------------------------- the game */
@@ -162,9 +188,7 @@ static int init(SDL_Renderer *r)
     toys_init();
     hint_init();
 
-    /* the automatic first ramp: a gentle S under the cloud that ends above the bucket's right lip */
-    static const float first[] = { -210, 88, -130, 74, -50, 48, 30, 8, 90, -38, 132, -80 };
-    strokes_add_line(first, 6, 5);
+    starter_ramp(false);                                 /* the automatic first ramp exists from the very start */
 
     PG_Camera cam = make_camera(0.0f);                   /* so pg3d_plane_z / pg3d_project are valid during the first update */
     view_set(&cam);

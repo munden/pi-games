@@ -14,6 +14,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 #define PW        256
 #define PH        128
@@ -57,10 +58,18 @@ static struct { int i, life; } glint[MAX_GLINT];
 static uint32_t glint_clock;
 
 static double st_sim_ms, st_sim_max, st_light_ms; static long st_ticks, st_frames, st_cells;
-static float cpu_avg_ms;
+static float cpu_sim_avg, cpu_draw_avg;       /* smoothed ms: per tick / per frame */
 
 static inline uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
-static inline double now_ms(void) { return (double)SDL_GetPerformanceCounter() * 1000.0 / (double)SDL_GetPerformanceFrequency(); }
+/* CPU time of this thread (not wall time), so other processes stealing the core do not show up as our cost */
+static inline double now_ms(void)
+{
+#ifdef CLOCK_THREAD_CPUTIME_ID
+    struct timespec t;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t) == 0) return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec * 1e-6;
+#endif
+    return (double)SDL_GetPerformanceCounter() * 1000.0 / (double)SDL_GetPerformanceFrequency();
+}
 
 /* ----------------------------------------------------------- chunk bookkeeping */
 static inline void mark(int x, int y)
@@ -84,12 +93,6 @@ static PG_Color hue_color(int h)
     float r = c.r * k, gg = c.g * k, b = c.b * k;
     c.r = (uint8_t)(r > 255 ? 255 : r); c.g = (uint8_t)(gg > 255 ? 255 : gg); c.b = (uint8_t)(b > 255 ? 255 : b);
     return c;
-}
-
-uint32_t sand_hue_argb(int hue)
-{
-    PG_Color c = hue_color(((hue % SD_HUES) + SD_HUES) % SD_HUES);
-    return PG_ARGB(255, c.r, c.g, c.b);
 }
 
 static void build_sand_lut(void)
@@ -190,7 +193,7 @@ static void paint_static(void)
 }
 
 /* ------------------------------------------------------------------ init */
-void sand_stats_reset(void) { st_sim_ms = st_sim_max = st_light_ms = 0; st_ticks = st_frames = st_cells = 0; }
+static void stats_reset(void) { st_sim_ms = st_sim_max = st_light_ms = 0; st_ticks = st_frames = st_cells = 0; }
 
 static void count_capacity(void)
 {
@@ -211,7 +214,7 @@ void sand_init(SDL_Renderer *r, uint32_t seed)
     rng = seed ? seed : 0x2545F491u;
     build_sand_lut();
     sand_reset();
-    sand_stats_reset();
+    stats_reset();
     tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, SD_W, SD_H);
     if (!tex) pg_fatal("sand texture: %s", SDL_GetError());
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
@@ -402,13 +405,12 @@ void sand_step(void)
     for (int c = 0; c < CW * CHN; c++) if (act[c]) act[c]--;
     double dt = now_ms() - t0;
     st_sim_ms += dt; if (dt > st_sim_max) st_sim_max = dt; st_ticks++; st_cells += visited;
-    cpu_avg_ms += ((float)dt - cpu_avg_ms) * 0.05f;
+    cpu_sim_avg += ((float)dt - cpu_sim_avg) * 0.05f;
 }
 
-float sand_cpu_ms(void) { return cpu_avg_ms; }
+float sand_cpu_ms(void) { return cpu_sim_avg + cpu_draw_avg; }
 
 /* ----------------------------------------------------------------- status */
-int   sand_count(void) { return n_sand; }
 float sand_fill(void) { return capacity > 0 ? (float)n_sand / (float)capacity : 0.0f; }
 int   sand_ceiling(void) { return ceil_count; }
 
@@ -515,8 +517,9 @@ void sand_draw(SDL_Renderer *r, int dx, int dy)
         SDL_Rect rc = { 0, miny, SD_W, maxy - miny + 1 };
         SDL_UpdateTexture(tex, &rc, &px[miny * SD_W], SD_W * 4);
     }
-    st_light_ms += now_ms() - t0; st_frames++;
-    cpu_avg_ms += ((float)(now_ms() - t0) - 0.0f) * 0.02f;
+    const double dt = now_ms() - t0;
+    st_light_ms += dt; st_frames++;
+    cpu_draw_avg += ((float)dt - cpu_draw_avg) * 0.05f;
     SDL_FRect d = { (float)dx, (float)dy, (float)SD_PX_W, (float)SD_PX_H };
     SDL_RenderCopyF(r, tex, NULL, &d);
 }

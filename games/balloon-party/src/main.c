@@ -91,24 +91,6 @@ static void touch_held(const PG_Touch *t, Track *k)
     }
 }
 
-#ifdef BP_DEBUG
-#include <stdlib.h>
-void balloons_debug_dump(void);
-static void debug_tick(void)
-{
-    const char *e = getenv("BP_DUMP");           /* dev only: comma separated ticks, e.g. BP_DUMP=149,160,175 */
-    if (!e) return;
-    unsigned long long now = (unsigned long long)pg_ticks();
-    for (const char *q = e; *q; ) {
-        char *end;
-        unsigned long long v = strtoull(q, &end, 10);
-        if (end == q) break;
-        if (v == now) { pg_log("tick %llu balloons=%d", now, balloons_count()); balloons_debug_dump(); }
-        q = *end == ',' ? end + 1 : end;
-    }
-}
-#endif
-
 static void update(void)
 {
     float t = pg_time();
@@ -131,9 +113,6 @@ static void update(void)
     fx_update();
     snd_update();
     hint_update(idle_s, !ever_touched);
-#ifdef BP_DEBUG
-    debug_tick();
-#endif
 }
 
 static void render(SDL_Renderer *r)

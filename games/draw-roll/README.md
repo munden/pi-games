@@ -8,7 +8,8 @@ quilted cushion walls, grassy hills that always funnel stray balls back to the b
 - Drag any finger anywhere: a thick, glossy 3D ramp appears under it, in a different bright colour per finger
   (up to ten at once). Balls roll on it the moment it exists. A tap on empty space just makes sparkles and a note.
 - Tap the cloud: it pops a ball out. It also drops one by itself every ~2.5 s. The bucket's googly eyes follow the balls.
-- Tap the big sponge (bottom-left): every ramp breaks into tumbling chunks and bubbles and washes away.
+- Tap the big sponge (bottom-left): every ramp breaks into tumbling chunks and bubbles and washes away; a moment later
+  a fresh starter ramp grows in. After ~2.5 minutes of quiet the old ramps melt away by themselves the same way.
 - Idle: a pointing hand "draws" a rainbow ramp at the start and after ~10 s untouched (it melts away by itself).
 - Too many ramps: the oldest ones thin out and fade gradually (limit 240 pieces); recycled balls shrink away with sparkles.
 
@@ -17,8 +18,8 @@ higher note), pop from the cloud, rising chimes when the bucket eats, whoosh for
 
 **Please check on the real device** (desktop-tested only; frame time, touch feel and audio level are unverified there)
 - `--fps`: `work=` should stay well below 12 ms with ~240 ramp pieces and 12 balls (scribble with all ten fingers).
-  The game lowers its own limits above ~12 ms (fewer pieces/balls/sparkles).
-- Drawing feels attached to the finger (the pen smooths the touch by ~1 tick); strokes near the side walls slide along them.
+  The game lowers its own limits from ~9 ms on (fewer pieces/balls/sparkles).
+- Drawing feels attached to the finger (light smoothing plus a live tail up to the fingertip); strokes slide along the walls.
 - The sponge washes on release of a short tap, never while a palm rests on it (> 2.5 s ignores it).
 - Sound level through the HDMI sink is gentle, nothing startling; hold both top corners still exits (not used by the game).
 

@@ -112,6 +112,7 @@ typedef struct Finger {
     uint8_t mode;
     Block *blk;                       /* F_GRAB */
     PG_Body *pad;                     /* F_PUSH: kinematic circle that shoves blocks */
+    uint8_t moved;                    /* F_PUSH: the finger has dragged (a sweep, not a tap) */
     float lx, ly;                     /* grab point in the block's local frame */
     float wx, wy;                     /* finger in world px on the pick plane */
 } Finger;

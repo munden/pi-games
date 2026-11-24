@@ -13,5 +13,6 @@ void scene_render_back(void);            /* BG list: painted panel, sun, clouds,
 void scene_render_front(void);           /* hills, trees, flowers (sorted list) */
 void scene_wall_hit(int side, float impact);   /* 0 = left, 1 = right: the cushion bulges for a moment */
 int  scene_wall_side(const PG_Body *wall);     /* which wall body is this (0/1), -1 if none */
+bool scene_hill_probe(float x, float *y, float *slope);   /* surface height and angle (rad) of the hill under x; false beyond the hills */
 
 #endif

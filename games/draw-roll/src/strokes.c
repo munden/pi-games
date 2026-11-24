@@ -388,6 +388,16 @@ void strokes_wipe(void)
         if (pens[i].active) pens[i].last_piece = -1;
 }
 
+void strokes_melt(int n)
+{
+    while (n > 0 && alive_count > 0 && q_head < q_tail) {
+        QEntry e = q_ring[q_head % POOL];
+        q_head++;
+        Piece *p = &pieces[e.idx];
+        if (p->uid == e.uid && p->state == PS_ALIVE) { start_fade(p); n--; }
+    }
+}
+
 bool strokes_contact(PG_Body *seg)
 {
     Piece *p = seg ? (Piece *)seg->user : NULL;

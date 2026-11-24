@@ -35,7 +35,7 @@
 #define SUN_Y         150.0f
 #define MAX_SPEED     1900.0f                 /* nothing in the pit ever moves faster than this */
 
-enum { TAG_BALL = 1, TAG_WALL, TAG_FINGER };
+enum { TAG_BALL = 1, TAG_WALL, TAG_FINGER, TAG_HINT };
 enum { B_FREE = 0, B_LIVE, B_DYING };
 enum { SP_STAR, SP_RING };
 enum { CAT_BB, CAT_BW, CAT_BF, CAT_N };
@@ -59,6 +59,7 @@ typedef struct {
     int      linger;
     float    wx, wy;                       /* where the finger touches the z=0 plane */
     float    pour_cd, trail;
+    int      pours_left;                   /* a held finger pours for a few seconds, then it is just a finger (stuck touches stay quiet) */
 } Finger;
 
 typedef struct { bool active; float x, delay, wait, vol; int note; } Drop;
@@ -295,6 +296,7 @@ static void on_contact(PG_Body *a, PG_Body *b, float speed, float x, float y, vo
     int cat = b->tag == TAG_BALL ? CAT_BB : b->tag == TAG_WALL ? CAT_BW : CAT_BF;
     squash(ba, x, y, speed);
     if (b->tag == TAG_BALL) squash(b->user, x, y, speed);
+    if (b->tag == TAG_HINT) return;                       /* the hint hand nudges balls in silence */
     if (speed > snd_best[cat]) { snd_best[cat] = speed; snd_r[cat] = ba->r; }
     if (speed > 640.0f) burst(x, y, 3, ba->hue, 170);
     if (b->tag == TAG_WALL && y > CEIL_Y - 14.0f) flag_kick = fmaxf(flag_kick, clampf(speed / 800.0f, 0.25f, 1.0f));
@@ -449,7 +451,7 @@ static void finger_step(int i, const PG_Touch *t)
                     int note = n0 + k * 2 > 9 ? 9 - (n0 + k * 2 - 9) % 3 : n0 + k * 2;
                     queue_drop(tx, 0.13f * (float)k, note, k ? 0.50f : 0.0f);
                 }
-                f->pour_cd = 0.75f;
+                f->pour_cd = 0.75f; f->pours_left = 16;
             } else {
                 poke(tx, ty);
                 f->pour_cd = 1e9f;
@@ -463,9 +465,9 @@ static void finger_step(int i, const PG_Touch *t)
             f->trail += sp * PG_DT;
             if (f->trail > 70.0f) { f->trail = 0; spark_add(SP_STAR, f->wx, f->wy, 50, pg_rand_range(-40, 40), pg_rand_range(-20, 60), 0.55f, 18, 40.0f + 55.0f * (float)i); }
         }
-        if (f->pour) {                                    /* holding on empty space pours slowly */
+        if (f->pour && f->pours_left > 0) {               /* holding on empty space pours slowly */
             f->pour_cd -= PG_DT;
-            if (f->pour_cd <= 0) { queue_drop(tx, 0, note_for_x(tx), 0.40f); f->pour_cd = 0.45f; }
+            if (f->pour_cd <= 0) { queue_drop(tx, 0, note_for_x(tx), 0.40f); f->pour_cd = 0.45f; f->pours_left--; }
         }
     } else if (t->state == PG_TOUCH_UP) {
         f->held = false;
@@ -839,7 +841,7 @@ static int init(SDL_Renderer *r)
     }
     hint_body = pg_world_add_circle(W, 0, 0, 32.0f, 0);
     if (!hint_body) pg_fatal("ball-pit: physics world full");
-    hint_body->tag = TAG_FINGER; hint_body->restitution = 0.25f; hint_body->friction = 0.2f;
+    hint_body->tag = TAG_HINT; hint_body->restitution = 0.25f; hint_body->friction = 0.2f;
     park(hint_body, POOL + PG_MAX_TOUCH);
 
     make_back_layer();
