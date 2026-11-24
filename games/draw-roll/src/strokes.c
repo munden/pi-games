@@ -1,0 +1,466 @@
+/* strokes.c - Draw & Roll: ramps drawn by fingers.
+ *
+ * A finger's drag is resampled every STROKE_STEP px. Every piece is
+ *   - a static physics segment (half thickness STROKE_R) that balls roll on immediately, and
+ *   - a 3D tube: one shared unit mesh stretched by a model matrix (no per-frame mesh allocation).
+ * Smooth joints use a mitred extension of the tube, sharp ones get a small sphere; the two free ends of a stroke get
+ * a round cap. When more than LIMIT_MAX pieces exist the oldest ones thin out and fade (their physics thins with
+ * them) and are only then removed. Wiping turns every piece into a tumbling chunk of debris plus sparkles.
+ */
+#include "strokes.h"
+#include "fx.h"
+
+#include <string.h>
+
+#define POOL        330
+#define LIMIT_MAX   250
+#define MAX_PENS    18
+#define PEN_AUX     17
+#define MAX_DEBRIS  130
+#define SPH_ANGLE   0.30f            /* joints that turn more than this (rad) get a sphere */
+#define SH_DX       15.0f            /* shadow offset on the back wall */
+#define SH_DY      (-19.0f)
+#define FADE_SECS   1.3f
+
+enum { PS_FREE = 0, PS_ALIVE, PS_FADING };
+
+typedef struct {
+    uint8_t  state;
+    bool     sph_a, sph_b;               /* round cap / joint sphere at the ends (stroke order) */
+    float    ax, ay, bx, by, len;        /* ends in stroke order */
+    float    dirx, diry;                 /* unit a->b */
+    float    ext_a, ext_b;               /* mitre extension at a / b */
+    float    cx, cy, c, s, hl;           /* cached tube placement: centre, cos/sin of its angle, half length */
+    float    z, age, pulse, fade, phase;
+    PG_Color color;
+    uint32_t stroke;
+    int      prev;
+    PG_Body *body;
+} Piece;
+
+typedef struct {
+    bool     active, rainbow, quiet;
+    float    lx, ly, tx, ty, z, stagger;
+    int      last_piece, pieces, color_idx;
+    uint32_t stroke;
+    PG_Color color;
+    float    hue;
+} Pen;
+
+typedef struct {
+    float x, y, z, vx, vy, vz, ang, spin, rx, spinx, life, max_life, hl;
+    PG_Color color;
+} Debris;
+
+static PG_World *world;
+static Piece     pieces[POOL];
+static Pen       pens[MAX_PENS];
+static int       q_ring[POOL], q_head, q_count;      /* alive pieces, oldest first */
+static Debris    debris[MAX_DEBRIS];
+static uint32_t  stroke_serial;
+static int       color_rot;
+static int       total_alive;
+static PG_Mesh  *m_tube, *m_cap, *m_quad;
+static PG_Tex    t_tube, t_shadow_line;
+
+static const PG_Color PAL[10] = {
+    { 255,  84, 104, 255 }, { 255, 150,  52, 255 }, { 255, 208,  56, 255 }, { 150, 222,  64, 255 }, {  56, 208, 128, 255 },
+    {  52, 204, 214, 255 }, {  84, 160, 255, 255 }, { 140, 112, 255, 255 }, { 232,  92, 214, 255 }, { 255, 128, 170, 255 } };
+
+PG_Color strokes_palette(int idx) { return PAL[((idx % 10) + 10) % 10]; }
+
+/* -------------------------------------------------------------------- assets */
+static PG_Mesh *build_tube(int n)
+{
+    MeshB b = mb_begin(2 * (n + 1), n * 6);
+    for (int k = 0; k < 2; k++)
+        for (int j = 0; j <= n; j++) {
+            float a = PG_TAU * (float)j / (float)n, y = sinf(a), z = -cosf(a);     /* j=0 is the hidden back */
+            mb_vert(&b, pg_v3(k ? 1.0f : -1.0f, y, z), pg_v3(0, y, z), (float)k, (float)j / (float)n, pg_rgb(255, 255, 255));
+        }
+    for (int j = 0; j < n; j++) mb_quad(&b, j, j + 1, (n + 1) + j + 1, (n + 1) + j);
+    return mb_end(&b);
+}
+
+static PG_Tex paint_tube(void)
+{
+    /* barber-pole candy stripes on white: the finger colour is multiplied in, so stripes stay subtle */
+    PG_Image *im = pg_img_new(32, 32, 0xFFFFFFFFu);
+    for (int j = 0; j < 32; j++)
+        for (int i = 0; i < 32; i++) {
+            float ph = fmodf((float)i / 32.0f * 2.0f + (float)j / 32.0f, 1.0f);
+            im->px[j * 32 + i] = ph < 0.5f ? PG_RGB24(0xFFFFFF) : PG_RGB24(0xDCDCEC);
+        }
+    pg_img_noise(im, 4, 21);
+    return tex_finish(im, true);
+}
+
+static PG_Tex paint_shadow_line(void)
+{
+    PG_Image *im = pg_img_new(8, 32, 0);
+    for (int j = 0; j < 32; j++) {
+        float d = fabsf(((float)j + 0.5f) / 32.0f - 0.5f) * 2.0f;                 /* 0 centre .. 1 edge */
+        float a = 1.0f - smooth01((d - 0.32f) / 0.68f);
+        for (int i = 0; i < 8; i++) im->px[j * 8 + i] = PG_ARGB((uint32_t)(a * 255.0f), 32, 46, 120);
+    }
+    return tex_finish(im, false);
+}
+
+void strokes_init(PG_World *w)
+{
+    world = w;
+    m_tube = build_tube(8);
+    m_cap  = pg_mesh_sphere(1.0f, 8, 4);
+    m_quad = pg_mesh_quad(1.0f, 1.0f);
+    t_tube = paint_tube();
+    t_shadow_line = paint_shadow_line();
+    memset(pieces, 0, sizeof pieces);
+    memset(pens, 0, sizeof pens);
+    memset(debris, 0, sizeof debris);
+    q_head = q_count = 0; total_alive = 0;
+    stroke_serial = 0; color_rot = 0;
+}
+
+void strokes_shutdown(void)
+{
+    pg_mesh_free(m_tube); pg_mesh_free(m_cap); pg_mesh_free(m_quad);
+    m_tube = m_cap = m_quad = NULL;
+}
+
+/* ------------------------------------------------------------------ helpers */
+static inline PG_M4 place(float x, float y, float z, float c, float s, float sx, float sy, float sz)
+{
+    PG_M4 m;
+    memset(&m, 0, sizeof m);
+    m.m[0] = c * sx; m.m[1] = s * sx; m.m[4] = -s * sy; m.m[5] = c * sy; m.m[10] = sz;
+    m.m[12] = x; m.m[13] = y; m.m[14] = z; m.m[15] = 1.0f;
+    return m;
+}
+
+/* cache the tube placement; the tube's local +x is oriented to the right so texture and shading never flip */
+static void piece_place(Piece *p)
+{
+    float ox = p->dirx, oy = p->diry, es = p->ext_a, ee = p->ext_b;
+    if (ox < 0.0f) { ox = -ox; oy = -oy; float t = es; es = ee; ee = t; }
+    float shift = (ee - es) * 0.5f;
+    p->cx = (p->ax + p->bx) * 0.5f + ox * shift;
+    p->cy = (p->ay + p->by) * 0.5f + oy * shift;
+    p->hl = p->len * 0.5f + (es + ee) * 0.5f;
+    p->c = ox; p->s = oy;
+}
+
+static void free_piece(Piece *p)
+{
+    if (p->body) { pg_world_remove(world, p->body); p->body = NULL; }
+    if (p->state != PS_FREE) total_alive--;
+    p->state = PS_FREE;
+}
+
+static Piece *alloc_piece(void)
+{
+    for (int i = 0; i < POOL; i++) if (pieces[i].state == PS_FREE) return &pieces[i];
+    int best = -1; float bf = 2.0f;                     /* pool exhausted (extreme load): steal the most faded piece */
+    for (int i = 0; i < POOL; i++) if (pieces[i].state == PS_FADING && pieces[i].fade < bf) { bf = pieces[i].fade; best = i; }
+    if (best < 0) return NULL;
+    free_piece(&pieces[best]);
+    return &pieces[best];
+}
+
+static void start_fade(Piece *p)
+{
+    if (p->state != PS_ALIVE) return;
+    p->state = PS_FADING;
+    p->fade = 1.0f;
+}
+
+static Piece *add_piece(Pen *pen, float ax, float ay, float bx, float by)
+{
+    float dx = bx - ax, dy = by - ay, len = sqrtf(dx * dx + dy * dy);
+    if (len < 1.0f) return NULL;
+    Piece *p = alloc_piece();
+    if (!p) return NULL;
+    PG_Body *body = pg_world_add_segment(world, ax, ay, bx, by, STROKE_R);
+    if (!body) return NULL;
+    memset(p, 0, sizeof *p);
+    body->friction = 0.12f; body->restitution = 0.5f; body->tag = TAG_STROKE; body->user = p;
+    p->body = body; p->state = PS_ALIVE; total_alive++;
+    p->ax = ax; p->ay = ay; p->bx = bx; p->by = by; p->len = len;
+    p->dirx = dx / len; p->diry = dy / len;
+    p->z = pen->z; p->fade = 1.0f; p->age = -pen->stagger * (float)pen->pieces;
+    p->phase = (float)pen->pieces * 0.55f;
+    p->color = pen->rainbow ? pg_hsv(pen->hue, 0.62f, 1.0f) : pen->color;
+    p->stroke = pen->stroke;
+    p->sph_a = pen->last_piece < 0;
+    p->sph_b = true;
+    p->prev = -1;
+    if (pen->last_piece >= 0) {
+        Piece *q = &pieces[pen->last_piece];
+        if (q->state == PS_ALIVE && q->stroke == pen->stroke) {
+            p->prev = pen->last_piece;
+            float th = acosf(clampf(q->dirx * p->dirx + q->diry * p->diry, -1.0f, 1.0f));
+            if (th < SPH_ANGLE) {                           /* smooth bend: mitre the two tubes, no sphere needed */
+                float e = STROKE_R * tanf(th * 0.5f);
+                q->ext_b = e; p->ext_a = e; q->sph_b = false;
+                piece_place(q);
+            }
+        }
+    }
+    piece_place(p);
+    q_ring[(q_head + q_count) % POOL] = (int)(p - pieces);
+    q_count++;
+    return p;
+}
+
+/* -------------------------------------------------------------------- pens */
+int strokes_next_color(void)
+{
+    for (int k = 0; k < 10; k++) {
+        int idx = (color_rot + k) % 10;
+        bool used = false;
+        for (int i = 0; i < MAX_PENS; i++) if (pens[i].active && !pens[i].rainbow && pens[i].color_idx == idx) used = true;
+        if (!used) { color_rot = idx + 1; return idx; }
+    }
+    return color_rot++ % 10;
+}
+
+bool strokes_pen_active(int pen) { return pen >= 0 && pen < MAX_PENS && pens[pen].active; }
+int  strokes_pen_color(int pen)  { return (pen >= 0 && pen < MAX_PENS && pens[pen].active && !pens[pen].rainbow) ? pens[pen].color_idx : -1; }
+
+static float clamp_x(float x) { return clampf(x, -WALL_IN_X + STROKE_R + 3.0f, WALL_IN_X - STROKE_R - 3.0f); }
+static float clamp_y(float y) { return clampf(y, -262.0f, 300.0f); }
+
+static void pen_begin(int idx, float x, float y, int color_idx, bool quiet, float stagger)
+{
+    Pen *pen = &pens[idx];
+    memset(pen, 0, sizeof *pen);
+    x = clamp_x(x); y = clamp_y(y);
+    pen->active = true; pen->quiet = quiet; pen->stagger = stagger;
+    pen->lx = pen->tx = x; pen->ly = pen->ty = y;
+    pen->last_piece = -1;
+    pen->stroke = ++stroke_serial;
+    pen->rainbow = color_idx < 0;
+    pen->color_idx = color_idx < 0 ? 0 : color_idx;
+    pen->color = strokes_palette(pen->color_idx);
+    pen->hue = pg_rand_range(0.0f, 360.0f);
+    pen->z = (float)((pen->stroke * 5u) % 7u) * 2.4f - 7.2f;         /* each stroke gets its own thin depth layer */
+}
+
+void strokes_pen_down(int idx, float x, float y, int color_idx)
+{
+    if (idx < 0 || idx >= MAX_PENS) return;
+    if (pens[idx].active) strokes_pen_up(idx);
+    pen_begin(idx, x, y, color_idx, false, 0.0f);
+}
+
+/* walk the pen towards (x,y), laying down pieces; at most max_pieces per call */
+static void pen_walk(Pen *pen, int max_pieces)
+{
+    for (int n = 0; n < max_pieces; n++) {
+        float dx = pen->tx - pen->lx, dy = pen->ty - pen->ly, d = sqrtf(dx * dx + dy * dy);
+        if (d < STROKE_STEP) break;
+        float nx = pen->lx + dx / d * STROKE_STEP, ny = pen->ly + dy / d * STROKE_STEP;
+        Piece *p = add_piece(pen, pen->lx, pen->ly, nx, ny);
+        pen->lx = nx; pen->ly = ny;
+        pen->hue += 13.0f;
+        if (p) {
+            pen->last_piece = (int)(p - pieces);
+            pen->pieces++;
+            if (!pen->quiet) {
+                if ((pen->pieces % 3) == 1) snd_blip(2 + (pen->pieces / 3) % 8, 0.085f);
+                if ((pen->pieces & 1) == 0) fx_burst(nx, ny, 22.0f, 1, 70.0f, pen->rainbow ? pen->hue : 20.0f + (float)pen->color_idx * 36.0f, 25.0f, 15.0f);
+            }
+        }
+    }
+}
+
+void strokes_pen_move(int idx, float x, float y)
+{
+    if (idx < 0 || idx >= MAX_PENS || !pens[idx].active) return;
+    Pen *pen = &pens[idx];
+    x = clamp_x(x); y = clamp_y(y);
+    pen->tx = lerpf(pen->tx, x, 0.65f);                  /* light smoothing: kills sensor jitter, costs ~1 tick of lag */
+    pen->ty = lerpf(pen->ty, y, 0.65f);
+    pen_walk(pen, 4);
+}
+
+void strokes_pen_up(int idx)
+{
+    if (idx < 0 || idx >= MAX_PENS || !pens[idx].active) return;
+    Pen *pen = &pens[idx];
+    float dx = pen->tx - pen->lx, dy = pen->ty - pen->ly;
+    if (dx * dx + dy * dy >= 9.0f * 9.0f) {              /* the last short stretch up to where the finger left */
+        Piece *p = add_piece(pen, pen->lx, pen->ly, pen->tx, pen->ty);
+        if (p) pen->pieces++;
+    }
+    pen->active = false;
+}
+
+void strokes_add_line(const float *xy, int n, int color_idx)
+{
+    if (n < 2) return;
+    Pen *pen = &pens[PEN_AUX];
+    pen_begin(PEN_AUX, xy[0], xy[1], color_idx, true, 0.012f);
+    for (int i = 1; i < n; i++) {
+        /* walk through the polyline in sub-steps so the pen never jumps more than a few pieces at once */
+        float sx = pen->tx, sy = pen->ty, ex = xy[i * 2], ey = xy[i * 2 + 1];
+        float d = sqrtf((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy));
+        int k = (int)(d / STROKE_STEP) + 1;
+        for (int j = 1; j <= k; j++) {
+            pen->tx = sx + (ex - sx) * (float)j / (float)k;
+            pen->ty = sy + (ey - sy) * (float)j / (float)k;
+            pen_walk(pen, 4);
+        }
+    }
+    strokes_pen_up(PEN_AUX);
+}
+
+/* ---------------------------------------------------------------- wipe/limit */
+static void spawn_debris(const Piece *p)
+{
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        Debris *d = &debris[i];
+        if (d->life > 0.0f) continue;
+        d->x = (p->ax + p->bx) * 0.5f; d->y = (p->ay + p->by) * 0.5f; d->z = p->z;
+        d->vx = pg_rand_range(-150.0f, 150.0f) + p->dirx * 40.0f;
+        d->vy = pg_rand_range(-30.0f, 260.0f);
+        d->vz = pg_rand_range(-50.0f, 90.0f);
+        d->ang = atan2f(p->c < 0 ? -p->s : p->s, fabsf(p->c)); d->spin = pg_rand_range(-7.0f, 7.0f);
+        d->rx = pg_rand_range(0.0f, PG_TAU); d->spinx = pg_rand_range(-6.0f, 6.0f);
+        d->max_life = d->life = pg_rand_range(0.9f, 1.5f);
+        d->hl = p->len * 0.5f; d->color = p->color;
+        return;
+    }
+}
+
+void strokes_wipe(void)
+{
+    int n = 0;
+    for (int i = 0; i < POOL; i++) if (pieces[i].state != PS_FREE) n++;
+    int every = n > MAX_DEBRIS ? (n + MAX_DEBRIS - 1) / MAX_DEBRIS : 1;
+    int k = 0;
+    for (int i = 0; i < POOL; i++) {
+        Piece *p = &pieces[i];
+        if (p->state == PS_FREE) continue;
+        if (p->age >= 0.0f && (k++ % every) == 0) {
+            spawn_debris(p);
+            if ((k % 5) == 1) fx_burst((p->ax + p->bx) * 0.5f, (p->ay + p->by) * 0.5f, 24.0f, 1, 150.0f, 200.0f + (float)(i % 9) * 18.0f, 60.0f, 18.0f);
+            if ((k % 7) == 2) fx_bubble((p->ax + p->bx) * 0.5f, (p->ay + p->by) * 0.5f, 26.0f, pg_rand_range(18.0f, 34.0f), pg_rand_range(40.0f, 90.0f));
+        }
+        free_piece(p);
+    }
+    q_head = q_count = 0;
+    for (int i = 0; i < MAX_PENS; i++)                      /* fingers still down keep drawing from where they are */
+        if (pens[i].active) pens[i].last_piece = -1;
+}
+
+void strokes_contact(PG_Body *seg)
+{
+    Piece *p = seg ? (Piece *)seg->user : NULL;
+    if (p && p->state != PS_FREE) p->pulse = 1.0f;
+}
+
+int strokes_count(void) { return q_count; }
+int strokes_total(void) { return total_alive; }
+
+void strokes_update(float degrade)
+{
+    int limit = LIMIT_MAX - (int)(clampf(degrade, 0.0f, 1.0f) * 100.0f);
+    while (q_count > limit) {                                 /* too many: the oldest piece starts to thin out */
+        int idx = q_ring[q_head];
+        q_head = (q_head + 1) % POOL; q_count--;
+        start_fade(&pieces[idx]);
+    }
+    for (int i = 0; i < POOL; i++) {
+        Piece *p = &pieces[i];
+        if (p->state == PS_FREE) continue;
+        p->age += PG_DT;
+        p->pulse = decay(p->pulse, 7.0f, PG_DT);
+        if (p->state == PS_FADING) {
+            p->fade -= PG_DT / FADE_SECS;
+            if (p->fade <= 0.0f) { free_piece(p); continue; }
+            if (p->body) p->body->radius = fmaxf(0.5f, STROKE_R * p->fade);     /* physics thins with the picture */
+        }
+    }
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        Debris *d = &debris[i];
+        if (d->life <= 0.0f) continue;
+        d->life -= PG_DT;
+        d->vy -= 900.0f * PG_DT;
+        d->x += d->vx * PG_DT; d->y += d->vy * PG_DT; d->z += d->vz * PG_DT;
+        d->ang += d->spin * PG_DT; d->rx += d->spinx * PG_DT;
+    }
+}
+
+/* ------------------------------------------------------------------ drawing */
+void strokes_render_shadows(void)
+{
+    const unsigned fl = PG3D_BG | PG3D_UNLIT | PG3D_NOFOG;
+    PG_Tex disc = pg3d_builtin(PG3D_TEX_SHADOW);
+    for (int i = 0; i < POOL; i++) {
+        const Piece *p = &pieces[i];
+        if (p->state == PS_FREE || p->age < 0.0f) continue;
+        float vis = ease_out_back(p->age / 0.22f) * p->fade;
+        if (vis < 0.02f) continue;
+        float r = (STROKE_R + 9.0f) * vis;
+        uint8_t a = (uint8_t)(clampf(vis, 0.0f, 1.0f) * 200.0f);
+        PG_M4 m = place(p->cx + SH_DX, p->cy + SH_DY, BACK_Z + 1.0f, p->c, p->s, p->len * 0.5f + 1.0f + (p->ext_a + p->ext_b) * 0.25f, r, 1.0f);
+        pg3d_mesh(m_quad, t_shadow_line, &m, pg_rgba(255, 255, 255, a), fl);
+        if (p->sph_a) { m = place(p->ax + SH_DX, p->ay + SH_DY, BACK_Z + 1.0f, 1, 0, r * 1.05f, r * 1.05f, 1); pg3d_mesh(m_quad, disc, &m, pg_rgba(30, 44, 118, (uint8_t)(a * 0.8f)), fl); }
+        if (p->sph_b) { m = place(p->bx + SH_DX, p->by + SH_DY, BACK_Z + 1.0f, 1, 0, r * 1.05f, r * 1.05f, 1); pg3d_mesh(m_quad, disc, &m, pg_rgba(30, 44, 118, (uint8_t)(a * 0.8f)), fl); }
+    }
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        const Debris *d = &debris[i];
+        if (d->life <= 0.0f) continue;
+        float k = smooth01(d->life / 0.5f);
+        PG_M4 m = place(d->x + SH_DX * 1.4f, d->y + SH_DY * 1.4f, BACK_Z + 1.0f, 1, 0, d->hl + 6.0f, 14.0f * k, 1);
+        pg3d_mesh(m_quad, disc, &m, pg_rgba(30, 44, 118, (uint8_t)(110.0f * k)), fl);
+    }
+}
+
+void strokes_render(void)
+{
+    float t = pg_time();
+    for (int i = 0; i < POOL; i++) {
+        const Piece *p = &pieces[i];
+        if (p->state == PS_FREE || p->age < 0.0f) continue;
+        float pop = ease_out_back(p->age / 0.22f);
+        float vis = pop * p->fade;
+        if (vis < 0.03f) continue;
+        float rs = STROKE_R * vis * (1.0f + 0.30f * p->pulse);
+        float shim = 0.97f + 0.09f * sinf(t * 2.3f - p->phase);
+        PG_Color c = col_mul(p->color, shim);
+        if (p->pulse > 0.02f) c = pg_color_lerp(c, pg_rgb(255, 255, 255), 0.55f * p->pulse);
+        c.a = (uint8_t)(clampf(p->fade * 1.7f, 0.0f, 1.0f) * 255.0f);
+        PG_M4 m = place(p->cx, p->cy, p->z, p->c, p->s, p->hl, rs, rs);
+        pg3d_mesh(m_tube, t_tube, &m, c, 0);
+        if (p->sph_a) {
+            m = place(p->ax, p->ay, p->z, 1.0f, 0.0f, rs, rs, rs);
+            pg3d_mesh(m_cap, t_tube, &m, c, 0);
+            pg3d_shine(pg_v3(p->ax, p->ay, p->z), rs, 0.5f);
+        }
+        if (p->sph_b) {
+            m = place(p->bx, p->by, p->z, 1.0f, 0.0f, rs, rs, rs);
+            pg3d_mesh(m_cap, t_tube, &m, c, 0);
+            pg3d_shine(pg_v3(p->bx, p->by, p->z), rs, 0.5f);
+        }
+    }
+    for (int i = 0; i < MAX_DEBRIS; i++) {
+        const Debris *d = &debris[i];
+        if (d->life <= 0.0f) continue;
+        float k = smooth01(d->life / 0.45f);
+        float r = STROKE_R * (0.45f + 0.55f * smooth01(d->life / 0.7f));
+        PG_M4 m = pg_m4_mul(place(d->x, d->y, d->z, cosf(d->ang), sinf(d->ang), 1, 1, 1), pg_m4_mul(pg_m4_rot_x(d->rx), pg_m4_scale(d->hl, r, r)));
+        PG_Color c = d->color; c.a = (uint8_t)(255.0f * k);
+        pg3d_mesh(m_tube, t_tube, &m, c, 0);
+    }
+    /* a soft light under every finger that is drawing: instant feedback even before the first piece exists */
+    PG_Tex glow = pg3d_builtin(PG3D_TEX_GLOW);
+    for (int i = 0; i < MAX_PENS; i++) {
+        const Pen *pen = &pens[i];
+        if (!pen->active || pen->quiet) continue;
+        PG_Color c = pen->rainbow ? pg_hsv(t * 120.0f, 0.55f, 1.0f) : pen->color;
+        PG_V3 pos = pg_v3(pen->tx, pen->ty, 46.0f);
+        pg3d_sprite(glow, pos, 120.0f, 120.0f, 0, pg_alpha(c, 0.55f), PG3D_ADDITIVE);
+        pg3d_sprite(glow, pos, 46.0f, 46.0f, 0, pg_rgba(255, 255, 255, 150), PG3D_ADDITIVE);
+    }
+}
