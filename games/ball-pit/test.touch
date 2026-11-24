@@ -1,0 +1,14 @@
+# Ball Pit scripted session: every mechanic, then ten fingers at once.
+# a tap in empty space: three balls drop from the beam, playing a little tune
+tap   15 0 300 150
+# a tap on the pile: the balls around it hop up
+tap   55 1 560 420
+# one finger sweeps through the pile, a second one comes back the other way
+drag  75 60 0 150 430 800 400
+drag 100 60 1 820 330 160 360
+# a hold in empty space pours balls slowly
+hold 150 80 2 700 130
+# a finger circles over the heap
+wave 160 70 3 480 380 130 1.5
+# ten fingers at once: random drags
+fuzz 220 80 10

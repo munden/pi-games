@@ -10,6 +10,7 @@ typedef struct {
     PG_Tex jelly[JB_STYLES];          /* glossy candy bodies */
     PG_Tex face;                      /* 4x2 sheet: sclera, pupil, blink, happy arc / smile, oh, grin, blush */
     PG_Tex fx;                        /* 4x2 sheet: bean highlight, dot highlight, heart, sparkle / puff, shadow, balloon, cloud */
+    PG_Tex acc;                       /* 3x2 sheet: a little leaf, sprout or antenna for each style */
     PG_Tex hand;                      /* pointing glove */
     PG_Tex wall, wain, ceil_t, floor_t, wood, sky, flag, fur;
     PG_Tex block[3], ball;

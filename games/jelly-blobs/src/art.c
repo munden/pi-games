@@ -4,7 +4,7 @@
 #include <math.h>
 #include <string.h>
 
-static const uint32_t CANDY[JB_STYLES] = { 0xFF4F78, 0x86E04A, 0xA06BFF, 0xFFD83A, 0x3FB8FF, 0xFF8E3A };
+static const uint32_t CANDY[JB_STYLES] = { 0xFF4F78, 0x9BEB52, 0xA46EFF, 0xFFDC3E, 0x3FB8FF, 0xFF8E3A };
 
 PG_Color art_candy(int style) { return pg_hex(CANDY[(unsigned)style % JB_STYLES]); }
 
@@ -90,7 +90,7 @@ static PG_Tex paint_jelly(uint32_t base, uint32_t seed)
     rng_state = seed * 2654435761u + 17u;
     uint32_t mid = PG_RGB24(base);
     uint32_t pale = mixc(mid, WHITE, 0.52f);
-    uint32_t deep = mixc(mid, PG_RGB24(0x3A1257), 0.30f);           /* shadows lean violet, never grey */
+    uint32_t deep = mixc(mid, PG_RGB24(0x3A1257), 0.24f);           /* shadows lean violet, never grey */
     PG_Image *im = pg_img_new(64, 64, mid);
     for (int y = 0; y < 64; y++)
         for (int x = 0; x < 64; x++) {
@@ -271,38 +271,86 @@ static PG_Tex paint_fx(void)
     return upload(sheet, false);
 }
 
+/* ---------------------------------------------------------------- little accessories */
+static void leaf(PG_Image *c, float bx, float by, float len, float wid, float ang, uint32_t top, uint32_t bot)
+{
+    /* a pointed leaf growing from (bx,by) in direction ang (0 = up) */
+    float ux = sinf(ang), uy = -cosf(ang);
+    float cx = bx + ux * len * 0.5f, cy = by + uy * len * 0.5f;
+    ell(c, cx, cy, wid, len * 0.5f, ang, top, bot);
+    pg_img_line(c, bx + ux * 1.5f, by + uy * 1.5f, bx + ux * len * 0.85f, by + uy * len * 0.85f, 0.9f, with_a(0xFFFFFF, 90));
+}
+
+static PG_Tex paint_acc(void)
+{
+    const uint32_t g1 = PG_RGB24(0x7BE05F), g2 = PG_RGB24(0x2FA14A), stem = PG_RGB24(0x8B5A3C);
+    PG_Image *sheet = pg_img_new(96, 64, 0x00FFFFFFu);
+    for (int cell = 0; cell < 6; cell++) {
+        PG_Image *c = pg_img_new(32, 32, 0x00FFFFFFu);
+        switch (cell) {
+        case 0:                                                    /* strawberry: a leafy crown */
+            leaf(c, 16, 28, 17, 4.6f, -0.95f, g1, g2); leaf(c, 16, 28, 17, 4.6f, 0.95f, g1, g2); leaf(c, 16, 28, 21, 5.0f, 0.0f, g1, g2);
+            leaf(c, 16, 28, 14, 4.0f, -0.45f, g1, g2); leaf(c, 16, 28, 14, 4.0f, 0.45f, g1, g2);
+            break;
+        case 1:                                                    /* lime: a sprout with two leaves */
+            curve(c, 16, 30, 15, 20, 17, 12, 2.4f, PG_RGB24(0x3D9A3C));
+            leaf(c, 17, 14, 13, 4.4f, 0.9f, g1, g2); leaf(c, 16.5f, 18, 12, 4.0f, -1.0f, g1, g2);
+            break;
+        case 2:                                                    /* grape: stem, leaf and a curly tendril */
+            curve(c, 16, 30, 14, 20, 13, 11, 2.8f, stem);
+            leaf(c, 14, 15, 15, 5.4f, 1.0f, g1, g2);
+            curve(c, 13, 12, 8, 6, 6, 11, 1.5f, PG_RGB24(0x58B847));
+            pg_img_disc(c, 6.0f, 11.5f, 1.2f, PG_RGB24(0x58B847));
+            break;
+        case 3:                                                    /* lemon: short stem and a leaf */
+            curve(c, 16, 30, 16, 22, 16, 17, 3.0f, PG_RGB24(0x6E8F2E));
+            leaf(c, 16, 20, 15, 5.0f, 0.8f, PG_RGB24(0xA6E85A), PG_RGB24(0x4E9E2F));
+            break;
+        case 4:                                                    /* sky: a star on a bendy antenna */
+            curve(c, 16, 30, 11, 21, 17, 11, 1.8f, PG_RGB24(0xFFFFFF));
+            pg_img_star(c, 17.0f, 9.0f, 7.5f, 3.4f, 5, 0.1f, PG_RGB24(0xFFE45E));
+            pg_img_disc(c, 15.0f, 7.5f, 1.6f, with_a(0xFFFFFF, 220));
+            break;
+        default:                                                   /* orange: stem and two leaves */
+            curve(c, 16, 30, 16, 22, 16, 17, 3.0f, stem);
+            leaf(c, 16, 20, 14, 4.6f, -0.85f, g1, g2); leaf(c, 16, 20, 14, 4.6f, 0.85f, g1, g2);
+            break;
+        }
+        blit(sheet, c, (cell % 3) * 32, (cell / 3) * 32);
+        pg_img_free(c);
+    }
+    return upload(sheet, false);
+}
+
 /* -------------------------------------------------------------------- hint hand */
 static PG_Tex paint_hand(void)
 {
-    const uint32_t glove = PG_RGB24(0xFFFFFF), shade = PG_RGB24(0xCDBCEB), cuff = PG_RGB24(0xFF7FA8), cuff2 = PG_RGB24(0xFFB7CF);
+    /* a cartoon glove, index finger up; the fingertip is at texel (26, 6) */
+    const uint32_t glove = PG_RGB24(0xFFFFFF), shade = PG_RGB24(0xC9B6EE), cuff = PG_RGB24(0xFF7FA8), cuff2 = PG_RGB24(0xFFB9D0), cuff3 = PG_RGB24(0xD9568C);
     PG_Image *im = pg_img_new(64, 64, 0x00FFFFFFu);
-    for (int pass = 0; pass < 2; pass++) {               /* pass 0: soft lilac edge (offset), pass 1: the white glove */
-        float o = pass == 0 ? 1.6f : 0.0f;
+    for (int pass = 0; pass < 2; pass++) {               /* pass 0: soft lilac edge (grown + offset), pass 1: the white glove */
+        float o = pass == 0 ? 1.4f : 0.0f, r = pass == 0 ? 1.5f : 0.0f;
         uint32_t c = pass == 0 ? shade : glove;
-        float r = pass == 0 ? 1.4f : 0.0f;
-        ell(im, 31.0f + o, 44.0f + o, 17.0f + r, 15.0f + r, 0, c, c);                          /* palm */
-        pg_img_line(im, 27.5f + o, 34.0f + o, 27.5f + o, 11.0f + o, 11.0f + 2 * r, c);         /* index finger */
-        pg_img_disc(im, 27.5f + o, 11.0f + o, 5.5f + r, c);
-        pg_img_disc(im, 40.0f + o, 31.0f + o, 6.3f + r, c);                                   /* curled fingers */
-        pg_img_disc(im, 46.0f + o, 36.5f + o, 6.0f + r, c);
-        pg_img_disc(im, 48.5f + o, 43.5f + o, 5.4f + r, c);
-        pg_img_line(im, 17.0f + o, 45.0f + o, 11.5f + o, 35.0f + o, 8.0f + 2 * r, c);         /* thumb */
-        pg_img_disc(im, 11.5f + o, 35.0f + o, 4.0f + r, c);
+        ell(im, 32.0f + o, 42.0f + o, 16.0f + r, 13.5f + r, 0, c, c);                           /* palm */
+        pg_img_line(im, 26.0f + o, 35.0f + o, 26.0f + o, 11.0f + o, 10.5f + 2 * r, c);         /* index finger */
+        pg_img_disc(im, 26.0f + o, 11.0f + o, 5.25f + r, c);
+        pg_img_disc(im, 38.5f + o, 31.0f + o, 6.2f + r, c);                                    /* curled fingers */
+        pg_img_disc(im, 45.0f + o, 36.5f + o, 5.9f + r, c);
+        pg_img_disc(im, 47.0f + o, 44.0f + o, 5.3f + r, c);
+        pg_img_line(im, 17.0f + o, 46.0f + o, 11.5f + o, 37.0f + o, 8.0f + 2 * r, c);          /* thumb */
+        pg_img_disc(im, 11.5f + o, 37.0f + o, 4.0f + r, c);
     }
-    ell(im, 33.0f, 49.0f, 11.0f, 7.0f, 0, with_a(0xCDBCEB, 0), with_a(0xCDBCEB, 120));       /* palm shading */
-    pg_img_rect(im, 15, 57, 34, 7, cuff);
-    pg_img_rect(im, 15, 57, 34, 2, cuff2);
-    pg_img_rect(im, 15, 61, 34, 3, mixc(cuff, PG_RGB24(0xB0407A), 0.4f));
+    pg_img_ring(im, 38.5f, 31.0f, 6.0f, 1.0f, with_a(0xC9B6EE, 150));                            /* finger creases */
+    pg_img_ring(im, 45.0f, 36.5f, 5.7f, 1.0f, with_a(0xC9B6EE, 150));
+    ell(im, 33.0f, 48.0f, 11.0f, 6.5f, 0, with_a(0xC9B6EE, 0), with_a(0xC9B6EE, 110));          /* palm shading */
+    pg_img_rect(im, 16, 51, 33, 13, cuff);                                                      /* the cuff */
+    pg_img_rect(im, 16, 51, 33, 3, cuff2);
+    pg_img_rect(im, 16, 60, 33, 4, cuff3);
+    pg_img_disc(im, 24.0f, 57.0f, 1.7f, with_a(0xFFFFFF, 230)); pg_img_disc(im, 32.5f, 57.0f, 1.7f, with_a(0xFFFFFF, 230)); pg_img_disc(im, 41.0f, 57.0f, 1.7f, with_a(0xFFFFFF, 230));
     return upload(im, false);
 }
 
 /* ------------------------------------------------------------------------ room */
-static void dots(PG_Image *im, int n, int w, int h, uint32_t c, float r0, float r1, uint32_t seed)
-{
-    rng_state = seed;
-    for (int i = 0; i < n; i++) pg_img_disc(im, 4.0f + rnd() * (float)(w - 8), 4.0f + rnd() * (float)(h - 8), r0 + rnd() * (r1 - r0), c);
-}
-
 static PG_Tex paint_wall(void)
 {
     PG_Image *im = pg_img_new(64, 64, PG_RGB24(0xFFF0D2));
@@ -425,11 +473,11 @@ void art_init(Art *a)
     a->face = paint_face();
     a->fx = paint_fx();
     a->hand = paint_hand();
+    a->acc = paint_acc();
     a->wall = paint_wall(); a->wain = paint_wain(); a->ceil_t = paint_ceil(); a->floor_t = paint_floor();
     a->wood = paint_wood(); a->sky = paint_sky(); a->flag = paint_flag(); a->fur = paint_fur();
     a->block[0] = paint_block('A', 0xFF8FA6, 0xFFFFFF);
     a->block[1] = paint_block('B', 0xFFD95C, 0x8A4B00);
     a->block[2] = paint_block('C', 0x5CC4FF, 0xFFFFFF);
     a->ball = paint_ball();
-    (void)dots;
 }

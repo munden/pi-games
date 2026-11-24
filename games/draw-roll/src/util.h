@@ -26,7 +26,7 @@
 #define MOUTH_X        112.0f      /* half width of the bucket mouth = where the hills end */
 #define DISP_X           0.0f      /* dispenser cloud, top centre */
 #define DISP_Y         188.0f
-#define DISP_Z         -34.0f
+#define DISP_Z         -90.0f      /* the cloud sits well behind the ball plane so balls fall in front of it */
 
 #define BALL_R_MIN      20.0f
 #define BALL_R_MAX      25.0f
@@ -52,6 +52,14 @@ static inline PG_Color col_mul(PG_Color c, float k)
     float r = c.r * k, g = c.g * k, b = c.b * k;
     return pg_rgba((uint8_t)(r > 255 ? 255 : r), (uint8_t)(g > 255 ? 255 : g), (uint8_t)(b > 255 ? 255 : b), c.a);
 }
+
+/* ----------------------------------------------------------------- view */
+/* Things drawn in front of the z=0 plane (sparkles, glows, the hint hand) are magnified by the perspective. at_depth()
+ * returns the world point at depth z that appears at the same screen position as (x,y) on the z=0 plane, so a glow
+ * drawn at z=46 sits exactly under the finger. view_set() must be given the camera every frame. */
+void   view_set(const PG_Camera *cam);
+PG_V3  at_depth(float x, float y, float z);
+float  depth_k(float z);                       /* on-screen size factor of depth z relative to the z=0 plane (1/depth_k) */
 
 /* ----------------------------------------------------------------- textures */
 /* Upload a painted image (optionally 15-bit dithered, PS1 style) and free it. */

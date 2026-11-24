@@ -1,0 +1,16 @@
+# Block Tower scripted session (headless smoke + screenshot). Coordinates are canvas pixels for --seed 1.
+# 1. taps in the empty air drop new blocks from the sky
+tap   20 5 700 130
+tap   50 5 380 90
+# 2. a ball is grabbed at the far left and thrown into the tallest tower
+drag  70 14 1 115 385 330 350
+# 3. blocks of the stairs are picked up by several fingers at once and carried up
+drag 100 150 2 610 235 720 120
+drag 130 130 3 610 326 520 150
+drag 150 110 4 532 328 430 170
+# 4. a finger sweeps through the room like a paddle (starts on empty floor)
+drag 165 30 6 40 330 250 300
+# 5. tap the big button on the toy chest: everything is tidied away, a fresh set rains down
+tap  255 7 860 392
+# 6. ten fingers at once
+fuzz 262 38 10

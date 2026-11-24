@@ -1,5 +1,7 @@
-/* util.c - the camera, the balloon palette, texture upload. */
+/* util.c - the camera, the balloon palette, texture upload, a tiny mesh builder. */
 #include "bp.h"
+
+#include <stdlib.h>
 
 /* One colour per pentatonic note: red is the low C, pink is the high E. */
 const uint32_t BAL_RGB[N_COL] = {
@@ -57,4 +59,36 @@ PG_Tex tex_upload(PG_Image *im, bool dither)
     PG_Tex t = pg3d_texture(im);
     pg_img_free(im);
     return t;
+}
+
+/* ----------------------------------------------------------- mesh builder */
+Build build_new(int max_v, int max_i)
+{
+    Build b = { calloc((size_t)max_v, sizeof(PG_Vertex)), calloc((size_t)max_i, sizeof(uint16_t)), 0, 0, max_v, max_i };
+    if (!b.v || !b.idx) pg_fatal("out of memory (mesh builder)");
+    return b;
+}
+
+int build_vert(Build *b, float x, float y, float z, float nx, float ny, float nz, float u, float v, PG_Color c)
+{
+    if (b->nv >= b->cap_v) pg_fatal("mesh builder: too many vertices");
+    PG_Vertex *o = &b->v[b->nv];
+    o->x = x; o->y = y; o->z = z; o->nx = nx; o->ny = ny; o->nz = nz; o->u = u; o->v = v; o->c = c;
+    return b->nv++;
+}
+
+void build_tri(Build *b, int a, int c, int d)
+{
+    if (b->ni + 3 > b->cap_i) pg_fatal("mesh builder: too many indices");
+    b->idx[b->ni++] = (uint16_t)a; b->idx[b->ni++] = (uint16_t)c; b->idx[b->ni++] = (uint16_t)d;
+}
+
+void build_quad(Build *b, int a, int c, int d, int e) { build_tri(b, a, c, d); build_tri(b, a, d, e); }
+
+PG_Mesh *build_done(Build *b)
+{
+    PG_Mesh *m = pg_mesh_build(b->v, b->nv, b->idx, b->ni);
+    free(b->v); free(b->idx);
+    b->v = NULL; b->idx = NULL;
+    return m;
 }

@@ -5,7 +5,7 @@
 
 #include "pg.h"
 
-enum { N_CUBE_SKINS = 8, N_LONG_SKINS = 2, N_TALL_SKINS = 2, N_FLAT_SKINS = 1 };
+enum { N_CUBE_SKINS = 8, N_LONG_SKINS = 2, N_TALL_SKINS = 3, N_FLAT_SKINS = 1 };
 
 /* toy blocks: the rim band of each face lands on the chamfer of the block mesh */
 PG_Image *paint_cube(int skin);       /* 64x64: letters, numbers, a star, animal faces */
@@ -24,6 +24,5 @@ PG_Image *paint_chest_front(void);    /* 96x80 */
 PG_Image *paint_button(void);         /* 64x64 round pictogram: a little block pyramid and a star */
 PG_Image *paint_glove(void);          /* 64x64 pointing glove, finger up */
 PG_Image *paint_fabric(void);         /* 16x16 neutral plush/paint grain to be tinted */
-PG_Image *paint_plank_blue(void);     /* 64x64 blue painted boards (chest) */
 
 #endif

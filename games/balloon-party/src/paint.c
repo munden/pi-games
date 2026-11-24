@@ -23,7 +23,7 @@ PG_Image *paint_balloon(void)
     PG_Image *im = pg_img_new(32, 32, 0xFFFFFFFFu);
     for (int j = 0; j < 32; j++) {
         float v = (float)j / 31.0f;
-        float k = v < 0.35f ? 1.0f - 0.04f * (v / 0.35f) : 0.96f - 0.30f * sstep(0.35f, 1.0f, v);
+        float k = v < 0.35f ? 1.0f - 0.03f * (v / 0.35f) : 0.97f - 0.17f * sstep(0.35f, 1.0f, v);
         uint8_t g = (uint8_t)(clampf(k, 0, 1) * 255.0f);
         pg_img_rect(im, 0, j, 32, 1, PG_ARGB(255, g, g, g));
     }
@@ -176,13 +176,25 @@ PG_Image *paint_window(int which)
         cloud(im, 64, 24, 1.1f);
         cloud(im, 40, 70, 0.8f);
     } else {
-        for (int k = 0; k < 6; k++) {
-            static const uint32_t rb[6] = { 0xFF5A5A, 0xFFA83A, 0xFFE84A, 0x56D66E, 0x4AA8FF, 0xA070FF };
-            pg_img_ring(im, 48, 118, 70.0f - 4.4f * (float)k, 4.6f, C24(rb[k]));
+        cloud(im, 18, 24, 1.0f);
+        cloud(im, 74, 16, 0.7f);
+        cloud(im, 26, 84, 0.8f);
+        /* a hot-air balloon drifting by: striped envelope, ropes, basket */
+        const float hx = 62.0f, hy = 46.0f;
+        pg_img_line(im, hx - 7, hy + 12, hx - 4, hy + 25, 1.0f, C24(0x7A5A3A));
+        pg_img_line(im, hx + 7, hy + 12, hx + 4, hy + 25, 1.0f, C24(0x7A5A3A));
+        pg_img_rect(im, (int)hx - 5, (int)hy + 25, 10, 7, C24(0xB57A3C));
+        pg_img_rect(im, (int)hx - 5, (int)hy + 25, 10, 2, C24(0xD9A05A));
+        pg_img_disc(im, hx, hy, 17.0f, C24(0xFF5A6A));
+        for (int k = -1; k <= 1; k++) pg_img_disc(im, hx + (float)k * 9.0f, hy, 8.0f - (float)(k * k) * 0.0f, (k & 1) ? C24(0xFFE45A) : C24(0xFF5A6A));
+        pg_img_disc(im, hx, hy, 6.5f, C24(0xFFE45A));
+        pg_img_disc(im, hx - 5.0f, hy - 6.0f, 5.0f, PG_ARGB(120, 255, 255, 255));
+        /* little birds */
+        for (int k = 0; k < 3; k++) {
+            float bx = 14.0f + 9.0f * (float)k, by = 52.0f + 4.0f * (float)(k & 1);
+            pg_img_line(im, bx - 3, by, bx, by + 2, 1.3f, C24(0x4A5A8A));
+            pg_img_line(im, bx, by + 2, bx + 3, by, 1.3f, C24(0x4A5A8A));
         }
-        cloud(im, 22, 26, 1.0f);
-        cloud(im, 72, 40, 0.75f);
-        cloud(im, 70, 78, 0.9f);
     }
     pg_img_disc(im, 16, 150, 58, C24(0x7BDC83));
     pg_img_disc(im, 84, 154, 60, C24(0x55C26E));
@@ -341,7 +353,7 @@ PG_Image *paint_prize(int kind)
     uint32_t top, bot, hi;
     if (kind == 0)      { top = 0xFFF58A; bot = 0xFFB000; hi = 0xFFFFD0; }
     else if (kind == 1) { top = 0xFF9DC2; bot = 0xE5285A; hi = 0xFFD2E2; }
-    else                { top = 0x9CC2FF; bot = 0x5B3FE6; hi = 0xD8E6FF; }
+    else                { top = 0xFF8CF0; bot = 0x9A1FD0; hi = 0xFFD2FA; }
     pg_img_gradient_v(im, 0, 0, 32, 32, C24(top), C24(bot));
     pg_img_line(im, 2, 30, 30, 2, 6, mixc(C24(hi), C24(top), 0.5f));
     for (int k = 0; k < 6; k++) pg_img_disc(im, 4.0f + 5.0f * (float)k, 6.0f + 3.5f * (float)((k * 5) % 6), 0.9f, C24(hi));

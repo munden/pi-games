@@ -46,6 +46,14 @@ PG_Tex     tex_upload(PG_Image *im, bool dither);                /* atlas upload
 extern const uint32_t BAL_RGB[N_COL];                            /* balloon colours, one per pentatonic note */
 PG_Color   bal_color(int col, uint8_t a);
 
+/* tiny mesh builder (init time only) */
+typedef struct { PG_Vertex *v; uint16_t *idx; int nv, ni, cap_v, cap_i; } Build;
+Build      build_new(int max_v, int max_i);
+int        build_vert(Build *b, float x, float y, float z, float nx, float ny, float nz, float u, float v, PG_Color c);
+void       build_tri(Build *b, int a, int c, int d);
+void       build_quad(Build *b, int a, int c, int d, int e);     /* two triangles a-c-d, a-d-e */
+PG_Mesh   *build_done(Build *b);                                 /* copies into a PG_Mesh and frees the scratch arrays */
+
 /* ------------------------------------------------------------------ paint.c */
 PG_Image *paint_balloon(void);
 PG_Image *paint_glint(void);
@@ -72,7 +80,7 @@ PG_Image *paint_streamer(uint32_t a, uint32_t b);
 /* ---------------------------------------------------------------- balloon.c */
 void  balloons_init(void);
 void  balloons_free(void);
-void  balloons_update(float t, int idle_boost);
+void  balloons_update(float t);
 void  balloons_draw_shadows(void);
 void  balloons_draw(void);
 int   balloons_count(void);
@@ -83,7 +91,6 @@ uint32_t balloon_gen(int i);
 bool  balloon_alive(int i, uint32_t gen);
 bool  balloon_screen(int i, float *sx, float *sy, float *sr);    /* centre and radius in canvas px */
 int   balloon_for_hint(void);
-void  balloon_poke(int i, float sx, float sy);                   /* instant visual dent when touched */
 void  balloon_pop(int i);
 void  balloon_bat(int i, float svx, float svy);                  /* screen-space velocity of the finger, px/s */
 void  balloons_puff(float sx, float sy);                         /* a tap in empty air nudges neighbours */

@@ -10,6 +10,10 @@
  *     rises from left to right;
  *   - at most MAX_BALLS balls exist: the oldest one pops out in a puff of stars, so the pit never fills up;
  *   - left alone, balls rain gently and a pointing hand shows what to do.
+ *
+ * Physics bodies are never added or removed while playing: every ball, finger and the hint hand owns a body made at
+ * init that is "parked" (made static and moved inside the floor, where nothing can touch it) while it is not in use.
+ * Recycling slots would let the engine warm-start a new contact with the leftover impulse of the old one.
  */
 #include "pit.h"
 
@@ -20,13 +24,14 @@
 #define MAX_BALLS     70
 #define POOL          (MAX_BALLS + 14)        /* live balls + balls that are playing their pop-out animation */
 #define MAX_SPARKS    120
-#define BACK_BALLS    44
+#define BACK_BALLS    36
 #define FINGER_R      50.0f
-#define FINGER_VMAX   1500.0f
+#define FINGER_VMAX   1100.0f
 #define GRAVITY      (-950.0f)
 #define IDLE_BALLS    20
 #define DROP_Q        24
 #define N_FLAGS       13
+#define MAX_SPEED     1900.0f                 /* nothing in the pit ever moves faster than this */
 
 enum { TAG_BALL = 1, TAG_WALL, TAG_FINGER };
 enum { B_FREE = 0, B_LIVE, B_DYING };
@@ -59,7 +64,7 @@ typedef struct { float x, y, z, r, a0, tilt, spin; uint8_t tex, lod; PG_Color ti
 
 /* ------------------------------------------------------------------------------------------------ state */
 static PitTex    T;
-static PG_Mesh  *m_sph[4];                /* unit spheres: 0 large (12x7), 1 medium (10x6), 2 small (8x6), 3 backdrop (8x5) */
+static PG_Mesh  *m_sph[4];                /* unit spheres: 0 large (14x8), 1 medium (12x7), 2 small (10x6), 3 backdrop (10x5) */
 static PG_Mesh  *m_paper, *m_dado, *m_side[2], *m_floor, *m_arch, *m_lip_front, *m_lip_top, *m_lip_cham, *m_ceil, *m_pennant;
 static PG_World *W;
 static Ball      balls[POOL];
@@ -72,7 +77,7 @@ static uint32_t  seq_counter;
 static float     idle_t = 7.5f, rain_cd = 1.0f, spawn_gate;
 static float     hint_a, hint_x, hint_y, hint_phase;
 static PG_Body  *hint_body;
-static bool      headless;
+static bool      hint_on, headless;
 static float     snd_best[CAT_N], snd_r[CAT_N];
 static uint32_t  snd_last[CAT_N];
 static PG_Camera cam_now;
@@ -99,6 +104,15 @@ static Ball *oldest_live(void)
     for (int i = 0; i < POOL; i++)
         if (balls[i].state == B_LIVE && (!o || balls[i].seq < o->seq)) o = &balls[i];
     return o;
+}
+
+/* Park a body: static, still, and inside the floor slab, one cell per slot so the broad phase stays cheap. */
+static void park(PG_Body *b, int slot)
+{
+    b->inv_mass = 0; b->inv_inertia = 0;
+    b->vx = b->vy = b->w = 0;
+    b->x = -400.0f + (float)(slot % 9) * 100.0f;
+    b->y = FLOOR_Y - 150.0f - (float)(slot / 9) * 100.0f;
 }
 
 /* ------------------------------------------------------------------------------------------------ sparkles */
@@ -166,8 +180,7 @@ static void ball_pop(Ball *b, bool sound)
 {
     if (b->state != B_LIVE) return;
     b->x = b->body->x; b->y = b->body->y; b->ang = b->body->angle;
-    pg_world_remove(W, b->body);
-    b->body = NULL;
+    park(b->body, (int)(b - balls));
     b->state = B_DYING; b->die_t = 0;
     burst(b->x, b->y, 7, b->hue, 220);
     if (sound) pg_sfx_pop(0.30f);
@@ -184,6 +197,29 @@ static bool free_spot(float x, float y, float r)
     return true;
 }
 
+static bool finger_near(float x, float y, float r)
+{
+    for (int i = 0; i < PG_MAX_TOUCH; i++) {
+        if (!fing[i].held && fing[i].linger <= 0) continue;
+        float dx = fing[i].body->x - x, dy = fing[i].body->y - y, rr = FINGER_R + r + 4.0f;
+        if (dx * dx + dy * dy < rr * rr) return true;
+    }
+    if (hint_on) {
+        float dx = hint_body->x - x, dy = hint_body->y - y, rr = hint_body->radius + r + 4.0f;
+        if (dx * dx + dy * dy < rr * rr) return true;
+    }
+    return false;
+}
+
+/* A new ball only appears where it has room to fall: no stack of balls right below it, pinned against the beam. */
+static bool spawn_clear(float x, float y, float r)
+{
+    if (finger_near(x, y, r)) return false;
+    for (int k = 0; k < 3; k++)
+        if (!free_spot(x, y - 1.7f * r * (float)k, r)) return false;
+    return true;
+}
+
 static Ball *ball_new(float x, float y, float vx, float vy, float r, bool pop_in)
 {
     while (live_count() >= live_cap) {                  /* the pit never fills up: the oldest ball pops out gracefully */
@@ -194,14 +230,14 @@ static Ball *ball_new(float x, float y, float vx, float vy, float r, bool pop_in
     Ball *b = NULL;
     for (int i = 0; i < POOL && !b; i++) if (balls[i].state == B_FREE) b = &balls[i];
     if (!b) return NULL;
-    PG_Body *bd = pg_world_add_circle(W, x, y, r, 1.0f);
-    if (!bd) return NULL;
-    memset(b, 0, sizeof *b);
-    bd->restitution = 0.52f; bd->friction = 0.12f; bd->lin_damp = 0.25f; bd->ang_damp = 0.35f;
+    PG_Body *bd = b->body;                              /* the slot's own body, waking up */
+    float mass = PG_PI * r * r;
+    bd->radius = r; bd->inv_mass = 1.0f / mass; bd->inv_inertia = 1.0f / (0.5f * mass * r * r);
+    bd->x = x; bd->y = y; bd->angle = 0;
     bd->vx = vx; bd->vy = vy; bd->w = pg_rand_range(-3, 3);
-    bd->tag = TAG_BALL; bd->user = b;
-    b->body = bd; b->state = B_LIVE; b->r = r; b->lod = (uint8_t)lod_for(r);
-    b->x = x; b->y = y;
+    b->state = B_LIVE; b->r = r; b->lod = (uint8_t)lod_for(r);
+    b->x = x; b->y = y; b->ang = 0;
+    b->sq = b->sq_t = 0; b->die_t = 0;
     pick_look(&b->tex, &b->tint, &b->hue);
     b->tilt = pg_rand_range(-0.6f, 0.6f); b->ct = cosf(b->tilt); b->st = sinf(b->tilt);
     b->yaw0 = pg_rand_range(0, PG_TAU);
@@ -212,9 +248,9 @@ static Ball *ball_new(float x, float y, float vx, float vy, float r, bool pop_in
 
 static void squash(Ball *b, float cx, float cy, float speed)
 {
-    float amp = clampf((speed - 120.0f) / 1500.0f, 0, 0.30f);
-    if (amp < 0.03f || b->state != B_LIVE) return;
-    if (amp < b->sq * expf(-9.0f * b->sq_t)) return;
+    float amp = clampf((speed - 160.0f) / 2600.0f, 0, 0.17f);
+    if (amp < 0.025f || b->state != B_LIVE) return;
+    if (amp < b->sq * expf(-8.0f * b->sq_t)) return;
     float nx = cx - b->body->x, ny = cy - b->body->y, l = sqrtf(nx * nx + ny * ny);
     if (l < 1e-3f) { nx = 0; ny = -1; } else { nx /= l; ny /= l; }
     b->sq = amp; b->sq_t = 0; b->sqx = nx; b->sqy = ny;
@@ -288,9 +324,14 @@ static void drops_update(void)
         if (!d->active) continue;
         d->delay -= PG_DT;
         if (d->delay > 0 || spawn_gate > 0) continue;
-        float r = pick_radius();
-        float x = clampf(d->x + pg_rand_range(-6, 6), -WALL_X + r + 8, WALL_X - r - 8), y = CEIL_Y - r - 8;
-        if (!free_spot(x, y, r)) {                       /* something is in the way: try again for a moment */
+        float r = pick_radius(), y = CEIL_Y - r - 8, x = 0;
+        bool ok = false;
+        static const float side[5] = { 0, 1.0f, -1.0f, 2.1f, -2.1f };      /* blocked (a stack under the finger)? drop beside it */
+        for (int k = 0; k < 5 && !ok; k++) {
+            x = clampf(d->x + side[k] * (r + 10.0f) + pg_rand_range(-6, 6), -WALL_X + r + 8, WALL_X - r - 8);
+            ok = spawn_clear(x, y, r);
+        }
+        if (!ok) {                                       /* really full up there: try again for a moment */
             d->wait += PG_DT;
             if (d->wait > 0.8f) d->active = false;
             continue;
@@ -365,24 +406,21 @@ static void finger_step(int i, const PG_Touch *t)
         if (t->state == PG_TOUCH_DOWN) {
             f->linger = 0; f->trail = 0;
             f->pour = !touching_ball(tx, ty);
-            if (!f->body) {
-                f->body = pg_world_add_circle(W, tx, ty, FINGER_R, 0);
-                if (f->body) { f->body->tag = TAG_FINGER; f->body->restitution = 0.25f; f->body->friction = 0.2f; }
-            }
-            if (f->body) { f->body->x = tx; f->body->y = ty; f->body->vx = f->body->vy = 0; }
+            f->body->x = tx; f->body->y = ty; f->body->vx = f->body->vy = 0;     /* the circle appears under the finger */
             spark_add(SP_RING, tx, ty, 30, 0, 0, 0.5f, 130, 190 + 40 * (float)i);
             if (f->pour) {                                /* empty space: three balls drop in a little rising tune */
                 int n0 = note_for_x(tx);
+                pg_sfx_chime(n0, 0.50f);                  /* heard on the very next frame; the balls follow */
                 for (int k = 0; k < 3; k++) {
                     int note = n0 + k * 2 > 9 ? 9 - (n0 + k * 2 - 9) % 3 : n0 + k * 2;
-                    queue_drop(tx, 0.13f * (float)k, note, 0.50f);
+                    queue_drop(tx, 0.13f * (float)k, note, k ? 0.50f : 0.0f);
                 }
                 f->pour_cd = 0.75f;
             } else {
                 poke(tx, ty);
                 f->pour_cd = 1e9f;
             }
-        } else if (f->body) {
+        } else {
             float vx = (tx - f->body->x) / PG_DT, vy = (ty - f->body->y) / PG_DT, sp = sqrtf(vx * vx + vy * vy);
             if (sp > FINGER_VMAX) { vx *= FINGER_VMAX / sp; vy *= FINGER_VMAX / sp; }
             f->body->vx = vx; f->body->vy = vy;
@@ -396,9 +434,9 @@ static void finger_step(int i, const PG_Touch *t)
     } else if (t->state == PG_TOUCH_UP) {
         f->held = false;
         f->linger = t->ticks < 12 ? 7 : 0;               /* a very short tap still shoves for a moment */
-        if (f->body) f->body->vx = f->body->vy = 0;
+        f->body->vx = f->body->vy = 0;
     } else if (!f->held && f->linger > 0) f->linger--;
-    if (!f->held && f->linger <= 0 && f->body) { pg_world_remove(W, f->body); f->body = NULL; }
+    if (!f->held && f->linger <= 0) park(f->body, POOL + i);
 }
 
 /* ------------------------------------------------------------------------------------------------ the pointing-hand hint */
@@ -408,18 +446,16 @@ static void hint_update(void)
     hint_a += ((show ? 1.0f : 0.0f) - hint_a) * (show ? 0.05f : 0.10f);
     if (hint_a < 0.03f) {
         hint_a = 0; hint_phase = 0; hint_x = -150.0f; hint_y = pile_top(-150.0f);
-        if (hint_body) { pg_world_remove(W, hint_body); hint_body = NULL; }
+        hint_on = false;
+        park(hint_body, POOL + PG_MAX_TOUCH);
         return;
     }
     hint_phase += PG_DT;
     float tx = 190.0f * sinf(hint_phase * 0.7f - 0.9f), ty = pile_top(tx) - 10.0f + 16.0f * sinf(hint_phase * 2.4f);
     ty = clampf(ty, FLOOR_Y + 40.0f, CEIL_Y - 120.0f);
     hint_x += (tx - hint_x) * 0.07f; hint_y += (ty - hint_y) * 0.07f;
-    if (!hint_body && hint_a > 0.6f) {
-        hint_body = pg_world_add_circle(W, hint_x, hint_y, 32.0f, 0);
-        if (hint_body) { hint_body->tag = TAG_FINGER; hint_body->restitution = 0.25f; hint_body->friction = 0.2f; }
-    }
-    if (hint_body) {
+    if (!hint_on && hint_a > 0.6f) { hint_on = true; hint_body->x = hint_x; hint_body->y = hint_y; }
+    if (hint_on) {                                        /* the fingertip of the hand is a gentle ghost finger */
         float vx = (hint_x - hint_body->x) / PG_DT, vy = (hint_y - hint_body->y) / PG_DT, sp = sqrtf(vx * vx + vy * vy);
         if (sp > 380.0f) { vx *= 380.0f / sp; vy *= 380.0f / sp; }
         hint_body->vx = vx; hint_body->vy = vy;
@@ -449,9 +485,11 @@ static void after_step(void)
             else if (bd->x > WALL_X + 4)   { bd->x = WALL_X - b->r;  if (bd->vx > 0) bd->vx = 0; }
             if (bd->y < FLOOR_Y - 4)       { bd->y = FLOOR_Y + b->r; if (bd->vy < 0) bd->vy = 0; }
             else if (bd->y > CEIL_Y + 4)   { bd->y = CEIL_Y - b->r;  if (bd->vy > 0) bd->vy = 0; }
+            float sp = bd->vx * bd->vx + bd->vy * bd->vy;
+            if (sp > MAX_SPEED * MAX_SPEED) { float k = MAX_SPEED / sqrtf(sp); bd->vx *= k; bd->vy *= k; }
             b->x = bd->x; b->y = bd->y; b->ang = bd->angle;
             b->age += PG_DT;
-            if (b->sq > 0) { b->sq_t += PG_DT; if (b->sq_t > 0.6f) b->sq = 0; }
+            if (b->sq > 0) { b->sq_t += PG_DT; if (b->sq_t > 0.7f) b->sq = 0; }
         } else if (b->state == B_DYING) {
             b->die_t += PG_DT;
             if (b->die_t > 0.4f) b->state = B_FREE;
@@ -477,6 +515,21 @@ static void update(void)
     after_step();
     sounds_play();
     sparks_update();
+#ifdef BP_DEBUG
+    if (pg_ticks() % 60 == 0) {
+        float vmax = 0, vsum = 0, pen = 0; int n = 0;
+        for (int i = 0; i < POOL; i++) {
+            if (balls[i].state != B_LIVE) continue;
+            PG_Body *a = balls[i].body; float sp = pg_body_speed(a); n++; vsum += sp; if (sp > vmax) vmax = sp;
+            for (int j = i + 1; j < POOL; j++) {
+                if (balls[j].state != B_LIVE) continue;
+                PG_Body *b = balls[j].body; float d = hypotf(a->x - b->x, a->y - b->y), o = a->radius + b->radius - d; if (o > pen) pen = o;
+                if (o > 20) pg_log("  OVERLAP %.1f: ball %d (x=%.0f y=%.0f r=%.0f v=%.0f,%.0f age=%.2f) vs %d (x=%.0f y=%.0f r=%.0f v=%.0f,%.0f age=%.2f)", o, i, a->x, a->y, a->radius, a->vx, a->vy, balls[i].age, j, b->x, b->y, b->radius, b->vx, b->vy, balls[j].age);
+            }
+        }
+        pg_log("t=%.0f live=%d vmax=%.0f vavg=%.0f maxpen=%.1f bodies=%d", pg_time(), n, vmax, n ? vsum / n : 0, pen, pg_world_count(W));
+    }
+#endif
 }
 
 /* ------------------------------------------------------------------------------------------------ rendering helpers */
@@ -544,17 +597,18 @@ static void draw_backdrop(float tm)
     PG_M4 id = pg_m4_identity();
     pg3d_mesh(m_paper, T.wallpaper, &id, pg_rgb(255, 255, 255), PG3D_BG);
     pg3d_mesh(m_dado, T.quilt, &id, pg_rgb(196, 178, 255), PG3D_BG);
-    bg_quad(T.sun, pg_v3(318, 150, BACK_Z + 4), 118, 118, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
-    bg_quad(T.cloud, pg_v3(-300, 150, BACK_Z + 4), 170, 85, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
-    bg_quad(T.cloud, pg_v3(-95, 205, BACK_Z + 4), 120, 60, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
+    float breathe = 1.0f + 0.035f * sinf(tm * 1.1f), drift = 24.0f * sinf(tm * 0.11f);
+    bg_quad(T.sun, pg_v3(318, 150, BACK_Z + 4), 118 * breathe, 118 * breathe, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
+    bg_quad(T.cloud, pg_v3(-300 + drift, 150, BACK_Z + 4), 170, 85, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
+    bg_quad(T.cloud, pg_v3(-95 - drift * 0.6f, 205, BACK_Z + 4), 120, 60, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     PG_M4 ma = pg_m4_translate(0, FLOOR_Y + 14, BACK_Z + 30);
     pg3d_mesh(m_arch, T.rainbow, &ma, pg_rgb(255, 255, 255), PG3D_BG);
     bg_quad(T.cloud, pg_v3(-338, FLOOR_Y + 70, BACK_Z + 36), 150, 75, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     bg_quad(T.cloud, pg_v3(338, FLOOR_Y + 70, BACK_Z + 36), 150, 75, pg_rgb(255, 255, 255), PG3D_BG | PG3D_UNLIT);
     pg3d_mesh(m_floor, T.mat, &id, pg_rgb(255, 255, 255), PG3D_BG);
-    pg3d_mesh(m_side[0], T.quilt, &id, pg_rgb(120, 214, 220), PG3D_BG);
-    pg3d_mesh(m_side[1], T.quilt, &id, pg_rgb(120, 214, 220), PG3D_BG);
-    pg3d_mesh(m_ceil, T.wood, &id, pg_rgb(255, 255, 255), PG3D_BG);
+    pg3d_mesh(m_side[0], T.quilt, &id, pg_rgb(128, 210, 226), PG3D_BG | PG3D_UNLIT);     /* left wall: in the shade */
+    pg3d_mesh(m_side[1], T.quilt, &id, pg_rgb(168, 236, 246), PG3D_BG | PG3D_UNLIT);
+    pg3d_mesh(m_ceil, T.wood, &id, pg_rgb(236, 222, 196), PG3D_BG | PG3D_UNLIT);
     draw_bunting(tm, CEIL_Y - 26, 36, BACK_Z + 80, N_FLAGS, 0);
     for (int i = 0; i < n_back; i++) {
         const BackBall *b = &back[i];
@@ -577,7 +631,7 @@ static void draw_balls(float tm)
         } else sc = b->age < 0.34f ? ease_out_back(b->age / 0.34f) : 1.0f;
         if (sc < 0.02f) continue;
         float k = 0, nx = 0, ny = 0;
-        if (b->state == B_LIVE && b->sq > 0) { k = b->sq * expf(-9.0f * b->sq_t) * cosf(26.0f * b->sq_t); nx = b->sqx; ny = b->sqy; }
+        if (b->state == B_LIVE && b->sq > 0) { k = b->sq * expf(-8.0f * b->sq_t) * cosf(24.0f * b->sq_t); nx = b->sqx; ny = b->sqy; }
         float yaw = b->yaw0 + 0.35f * b->ang;
         PG_M4 m = ball_xform(x, y, 0, b->r * sc, b->ang, b->ct, b->st, yaw, k, nx, ny);
         pg3d_mesh(m_sph[b->lod], T.ball[b->tex], &m, b->tint, 0);
@@ -600,6 +654,13 @@ static void draw_lip(void)
 static void draw_fx(float tm)
 {
     PG_Tex star = pg3d_builtin(PG3D_TEX_STAR), glow = pg3d_builtin(PG3D_TEX_GLOW);
+    for (int i = 0; i < 9; i++) {                           /* slow drifting twinkles: the room is never still */
+        float ph = (float)i * 1.7f, x = 360.0f * sinf(tm * (0.06f + 0.011f * (float)i) + ph), y = 30.0f + 170.0f * sinf(tm * (0.08f + 0.007f * (float)i) + ph * 2.1f);
+        float tw = 0.5f + 0.5f * sinf(tm * 0.9f + ph * 3.0f), sz = 11.0f + 7.0f * tw;
+        PG_Color c = pg_hsv(40.0f + 40.0f * (float)(i % 4), 0.3f, 1.0f);
+        pg3d_sprite(star, pg_v3(x, y, -30.0f + 12.0f * (float)i), sz, sz, tm * 0.3f + ph, pg_alpha(c, 0.30f + 0.30f * tw), PG3D_ADDITIVE);
+        pg3d_sprite(glow, pg_v3(x, y, -30.0f + 12.0f * (float)i), sz * 2.4f, sz * 2.4f, 0, pg_alpha(c, 0.12f + 0.10f * tw), PG3D_ADDITIVE);
+    }
     for (int i = 0; i < MAX_SPARKS; i++) {
         const Spark *s = &sparks[i];
         if (s->life <= 0) continue;
@@ -620,8 +681,8 @@ static void draw_fx(float tm)
         PG_V3 p = pg_v3(f->wx, f->wy, 0);
         float pulse = 1.0f + 0.05f * sinf(tm * 8.0f + (float)i);
         PG_Color c = pg_hsv(190.0f + 40.0f * (float)i, 0.35f, 1.0f);
-        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.95f), PG3D_ADDITIVE);
-        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.30f), PG3D_ADDITIVE);
+        pg3d_sprite(T.ring, p, FINGER_R * 2.46f * pulse, FINGER_R * 2.46f * pulse, 0, pg_alpha(c, 0.75f), PG3D_ADDITIVE);
+        pg3d_sprite(glow, p, FINGER_R * 3.0f, FINGER_R * 3.0f, 0, pg_alpha(c, 0.22f), PG3D_ADDITIVE);
         for (int k = 0; k < 3; k++) {
             float a = tm * 2.3f + (float)k * 2.094f + (float)i;
             float sz = 15.0f + 5.0f * sinf(tm * 7.0f + (float)(k * 2 + i));
@@ -681,10 +742,10 @@ static void make_back_layer(void)
 
 static void build_meshes(void)
 {
-    m_sph[0] = pg_mesh_sphere(1, 12, 7);
-    m_sph[1] = pg_mesh_sphere(1, 10, 6);
-    m_sph[2] = pg_mesh_sphere(1, 8, 6);
-    m_sph[3] = pg_mesh_sphere(1, 8, 5);
+    m_sph[0] = pg_mesh_sphere(1, 14, 8);
+    m_sph[1] = pg_mesh_sphere(1, 12, 7);
+    m_sph[2] = pg_mesh_sphere(1, 10, 6);
+    m_sph[3] = pg_mesh_sphere(1, 10, 5);
     m_pennant = mesh_pennant(40, 52);
     m_arch = mesh_arch(330, 28, 20, 5);
 
@@ -693,15 +754,18 @@ static void build_meshes(void)
     float dado_top = 24.0f;
     m_dado  = mesh_tiles(pg_v3(xl, FLOOR_Y, BACK_Z), pg_v3(bw / 8, 0, 0), pg_v3(0, (dado_top - FLOOR_Y) / 2, 0), 8, 2, pg_v3(0, 0, 1), true);
     m_paper = mesh_tiles(pg_v3(xl, dado_top, BACK_Z), pg_v3(bw / 8, 0, 0), pg_v3(0, (CEIL_Y + 10 - dado_top) / 2, 0), 8, 2, pg_v3(0, 0, 1), true);
-    float depth = LIP_Z1 - BACK_Z;
-    /* side walls (inner faces) and the floor, ceiling underside */
-    m_side[0] = mesh_tiles(pg_v3(-WALL_X, FLOOR_Y, BACK_Z), pg_v3(0, 0, depth / 3), pg_v3(0, (CEIL_Y + 10 - FLOOR_Y) / 6, 0), 3, 6, pg_v3(1, 0, 0), true);
-    m_side[1] = mesh_tiles(pg_v3(WALL_X, FLOOR_Y, BACK_Z), pg_v3(0, 0, depth / 3), pg_v3(0, (CEIL_Y + 10 - FLOOR_Y) / 6, 0), 3, 6, pg_v3(-1, 0, 0), true);
-    m_floor = mesh_tiles(pg_v3(-WALL_X, FLOOR_Y, BACK_Z), pg_v3(WALL_X * 2 / 8, 0, 0), pg_v3(0, 0, depth / 3), 8, 3, pg_v3(0, 1, 0), false);
-    m_ceil  = mesh_tiles(pg_v3(-WALL_X - 60, CEIL_Y, BACK_Z), pg_v3((WALL_X + 60) * 2 / 8, 0, 0), pg_v3(0, 0, depth / 2), 8, 2, pg_v3(0, -1, 0), false);
+    float depth = LIP_Z1 - BACK_Z, wall_h = CEIL_Y + 10 - FLOOR_Y, wall_z1 = LIP_Z1 + 160.0f;
+    /* side walls (inner faces, running on past the lip so no gap shows at the screen edge), floor mat, ceiling underside */
+    m_side[0] = mesh_tiles(pg_v3(-WALL_X, FLOOR_Y, BACK_Z), pg_v3(0, 0, (wall_z1 - BACK_Z) / 4), pg_v3(0, wall_h / 6, 0), 4, 6, pg_v3(1, 0, 0), true);
+    m_side[1] = mesh_tiles(pg_v3(WALL_X, FLOOR_Y, BACK_Z), pg_v3(0, 0, (wall_z1 - BACK_Z) / 4), pg_v3(0, wall_h / 6, 0), 4, 6, pg_v3(-1, 0, 0), true);
+    m_floor = mesh_tiles(pg_v3(-WALL_X - 90, FLOOR_Y, BACK_Z), pg_v3((WALL_X + 90) * 2 / 9, 0, 0), pg_v3(0, 0, depth / 3), 9, 3, pg_v3(0, 1, 0), false);
+    m_ceil  = mesh_tiles(pg_v3(-WALL_X - 60, CEIL_Y, BACK_Z), pg_v3((WALL_X + 60) * 2 / 8, 0, 0), pg_v3(0, 0, (depth + 160.0f) / 3), 8, 3, pg_v3(0, -1, 0), false);
+    pg_mesh_gradient_y(m_side[0], pg_rgb(176, 184, 200), pg_rgb(255, 255, 255));     /* darker toward the floor: a cheap contact shadow */
+    pg_mesh_gradient_y(m_side[1], pg_rgb(176, 184, 200), pg_rgb(255, 255, 255));
+    pg_mesh_gradient_y(m_dado, pg_rgb(186, 186, 206), pg_rgb(255, 255, 255));
     /* the front lip: painted toy blocks on the face, wood on the chamfer and top */
     float lx = -500, lw = 1000.0f / 8.0f, ch = 14.0f, zf = LIP_Z1, ztop = LIP_Z1 - ch;
-    m_lip_front = mesh_tiles(pg_v3(lx, LIP_TOP - ch - 62.0f, zf), pg_v3(lw, 0, 0), pg_v3(0, 62.0f, 0), 8, 2, pg_v3(0, 0, 1), true);
+    m_lip_front = mesh_tiles(pg_v3(lx, LIP_TOP - ch - 62.0f, zf), pg_v3(lw, 0, 0), pg_v3(0, 62.0f, 0), 8, 1, pg_v3(0, 0, 1), true);
     m_lip_cham  = mesh_tiles(pg_v3(lx, LIP_TOP - ch, zf), pg_v3(lw, 0, 0), pg_v3(0, ch, -ch), 8, 1, pg_v3(0, 0.7071f, 0.7071f), true);
     m_lip_top   = mesh_tiles(pg_v3(lx, LIP_TOP, LIP_Z0), pg_v3(lw, 0, 0), pg_v3(0, 0, ztop - LIP_Z0), 8, 1, pg_v3(0, 1, 0), false);
 }
@@ -714,7 +778,7 @@ static int init(SDL_Renderer *r)
     paint_textures(&T);
     build_meshes();
     pg3d_sky(pg_hex(0xBFE6FF), pg_hex(0xFFF0C8));
-    pg3d_light(pg_v3(-0.34f, 0.60f, 0.72f), pg_rgb(140, 136, 124), pg_rgb(158, 164, 188), pg_rgb(102, 96, 94));
+    pg3d_light(pg_v3(-0.34f, 0.60f, 0.72f), pg_rgb(130, 126, 114), pg_rgb(170, 176, 200), pg_rgb(114, 108, 106));
 
     W = pg_world_new(0, GRAVITY);
     if (!W) pg_fatal("ball-pit: out of memory (physics)");
@@ -727,6 +791,27 @@ static int init(SDL_Renderer *r)
         pg_world_add_segment(W, WALL_X + th, FLOOR_Y - 2 * th, WALL_X + th, CEIL_Y + 2 * th, th),
         pg_world_add_segment(W, -WALL_X - 2 * th, CEIL_Y + th, WALL_X + 2 * th, CEIL_Y + th, th) };
     for (int i = 0; i < 4; i++) { seg[i]->tag = TAG_WALL; seg[i]->restitution = 0.45f; seg[i]->friction = 0.35f; }
+
+    /* every body that will ever exist, parked until it is needed (see the header comment) */
+    for (int i = 0; i < POOL; i++) {
+        PG_Body *bd = pg_world_add_circle(W, 0, 0, 30.0f, 1.0f);
+        if (!bd) pg_fatal("ball-pit: physics world full");
+        bd->restitution = 0.52f; bd->friction = 0.12f; bd->lin_damp = 0.25f; bd->ang_damp = 0.35f;
+        bd->tag = TAG_BALL; bd->user = &balls[i];
+        balls[i].body = bd; balls[i].state = B_FREE;
+        park(bd, i);
+    }
+    for (int i = 0; i < PG_MAX_TOUCH; i++) {
+        PG_Body *bd = pg_world_add_circle(W, 0, 0, FINGER_R, 0);
+        if (!bd) pg_fatal("ball-pit: physics world full");
+        bd->tag = TAG_FINGER; bd->restitution = 0.25f; bd->friction = 0.2f;
+        fing[i].body = bd;
+        park(bd, POOL + i);
+    }
+    hint_body = pg_world_add_circle(W, 0, 0, 32.0f, 0);
+    if (!hint_body) pg_fatal("ball-pit: physics world full");
+    hint_body->tag = TAG_FINGER; hint_body->restitution = 0.25f; hint_body->friction = 0.2f;
+    park(hint_body, POOL + PG_MAX_TOUCH);
 
     make_back_layer();
     /* a first heap of balls, already settled, so the very first frame invites play */

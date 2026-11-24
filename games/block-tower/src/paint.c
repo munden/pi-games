@@ -71,6 +71,17 @@ static void rrect(PG_Image *im, float x, float y, float w, float h, float r, uin
         }
 }
 
+/* five-pointed star with independent x/y radii (for textures that get stretched, such as sphere skins) */
+static void star_xy(PG_Image *im, float cx, float cy, float rx, float ry, uint32_t c)
+{
+    float vx[10], vy[10];
+    for (int k = 0; k < 10; k++) {
+        float a = (float)k * PG_PI / 5.0f - PG_PI * 0.5f, rr = (k & 1) ? 0.46f : 1.0f;
+        vx[k] = cx + cosf(a) * rx * rr; vy[k] = cy + sinf(a) * ry * rr;
+    }
+    for (int k = 0; k < 10; k++) tri(im, cx, cy, vx[k], vy[k], vx[(k + 1) % 10], vy[(k + 1) % 10], c);
+}
+
 static void ellipse(PG_Image *im, float cx, float cy, float rx, float ry, uint32_t c)
 {
     float m = fminf(rx, ry);
@@ -259,12 +270,12 @@ PG_Image *paint_tall(int skin)
         tri(im, 14, 56, 14, 74, 6.5f, 76, C(0xE8433A)); tri(im, 34, 56, 34, 74, 41.5f, 76, C(0xE8433A));
         tri(im, 18, 71, 30, 71, 24, 88, C(0xFF8A2A)); tri(im, 20.5f, 71, 27.5f, 71, 24, 81, C(0xFFE45C));
         return face_done(im, base, 6);
-    } else {                          /* giraffe */
+    } else if (skin % N_TALL_SKINS == 1) {   /* giraffe */
         uint32_t base = C(0xFFC83D);
         PG_Image *im = face_new(48, 96, base, 410);
-        for (int i = 0; i < 12; i++) {
-            float w = 7.0f + rndf() * 5.0f, h = 6.0f + rndf() * 5.0f;
-            rrect(im, 6.0f + rndf() * 30.0f, 52.0f + rndf() * 36.0f, w, h, 2.5f, alpha(C(0xB8702A), 235));
+        for (int i = 0; i < 12; i++) {       /* patches on a jittered grid */
+            float w = 7.0f + rndf() * 3.0f, h = 6.0f + rndf() * 3.0f;
+            rrect(im, 7.0f + (float)(i % 3) * 13.0f + rndf() * 3.0f, 52.0f + (float)(i / 3) * 10.0f + rndf() * 2.0f, w, h, 2.5f, alpha(C(0xB8702A), 235));
         }
         pg_img_line(im, 17, 13, 15.5f, 8, 2.6f, C(0xB8702A)); pg_img_line(im, 31, 13, 32.5f, 8, 2.6f, C(0xB8702A));
         pg_img_disc(im, 15.5f, 8, 2.4f, C(0x8A4A1A)); pg_img_disc(im, 32.5f, 8, 2.4f, C(0x8A4A1A));
@@ -275,6 +286,24 @@ PG_Image *paint_tall(int skin)
         rrect(im, 15, 36.5f, 18, 12, 6, C(0xFFEBC4));
         pg_img_disc(im, 20.5f, 41.5f, 1.4f, C(0x8A4A2A)); pg_img_disc(im, 27.5f, 41.5f, 1.4f, C(0x8A4A2A));
         pg_img_line(im, 20, 45.5f, 28, 45.5f, 1.2f, C(0xC8785A));
+        return face_done(im, base, 6);
+    } else {                          /* friendly robot */
+        uint32_t base = C(0xFF8A2A);
+        PG_Image *im = face_new(48, 96, base, 420);
+        pg_img_line(im, 24, 14, 24, 8.5f, 2.2f, C(0x8C96B0)); pg_img_disc(im, 24, 8.5f, 3.2f, C(0xE8433A)); pg_img_disc(im, 23.2f, 7.6f, 1.1f, C(0xFFFFFF));
+        rrect(im, 9, 16, 30, 26, 6, shade(C(0x8C96B0), 0.7f));
+        rrect(im, 9, 14.5f, 30, 26, 6, C(0xD9E2F2));
+        rrect(im, 11, 16, 12, 4, 2, alpha(C(0xFFFFFF), 180));
+        rrect(im, 13, 21, 8, 8, 2, C(0x3E86E8)); rrect(im, 27, 21, 8, 8, 2, C(0x3E86E8));
+        pg_img_disc(im, 17, 25, 2.2f, C(0xFFF4A0)); pg_img_disc(im, 31, 25, 2.2f, C(0xFFF4A0));
+        for (int i = 0; i < 4; i++) pg_img_line(im, 17.0f + (float)i * 4.6f, 33, 17.0f + (float)i * 4.6f, 37, 1.6f, C(0x6A7494));
+        rrect(im, 5, 46, 6, 22, 3, C(0x8C96B0)); rrect(im, 37, 46, 6, 22, 3, C(0x8C96B0));
+        rrect(im, 12, 45.5f, 24, 28, 5, shade(C(0x8C96B0), 0.7f));
+        rrect(im, 12, 44, 24, 28, 5, C(0xD9E2F2));
+        rrect(im, 16, 49, 16, 13, 3, C(0x4A5578));
+        pg_img_disc(im, 20, 55.5f, 2.4f, C(0xE8433A)); pg_img_disc(im, 26, 55.5f, 2.4f, C(0x4CB84A)); pg_img_disc(im, 31, 55.5f, 2, C(0xFFD23F));
+        pg_img_star(im, 24, 67, 3.6f, 1.7f, 5, 0, C(0xFFD23F));
+        rrect(im, 14, 76, 8, 10, 2, C(0x8C96B0)); rrect(im, 26, 76, 8, 10, 2, C(0x8C96B0));
         return face_done(im, base, 6);
     }
 }
@@ -302,12 +331,12 @@ PG_Image *paint_ball(int which)
         }
         pg_img_rect(im, 0, 0, 64, 6, alpha(C(0xFFFFFF), 150));
         pg_img_rect(im, 0, 58, 64, 6, alpha(C(0xFFFFFF), 150));
-    } else {            /* star ball: purple with a white band of golden stars */
+    } else {            /* star ball: purple with a white band of golden stars (drawn narrow: the sphere stretches u 2:1) */
         pg_img_gradient_v(im, 0, 0, 64, 64, C(0x8A55E8), C(0x6A3BC8));
-        pg_img_rect(im, 0, 23, 64, 18, C(0xFFF4D6));
-        pg_img_rect(im, 0, 23, 64, 2, shade(C(0xFFF4D6), 0.82f)); pg_img_rect(im, 0, 39, 64, 2, shade(C(0xFFF4D6), 0.82f));
-        for (int i = 0; i < 6; i++) pg_img_star(im, 5.5f + (float)i * 10.67f, 32.5f, 7.2f, 3.4f, 5, 0, C(0xFF9A2E));
-        for (int i = 0; i < 6; i++) { pg_img_disc(im, 11.0f + (float)i * 10.67f, 12, 2.2f, C(0xFFD23F)); pg_img_disc(im, 11.0f + (float)i * 10.67f, 52, 2.2f, C(0xFFD23F)); }
+        pg_img_rect(im, 0, 20, 64, 24, C(0xFFF4D6));
+        pg_img_rect(im, 0, 20, 64, 2, shade(C(0xFFF4D6), 0.80f)); pg_img_rect(im, 0, 42, 64, 2, shade(C(0xFFF4D6), 0.80f));
+        for (int i = 0; i < 4; i++) star_xy(im, 8.0f + (float)i * 16.0f, 32.5f, 6.4f, 11.5f, C(0xFF9A2E));
+        for (int i = 0; i < 4; i++) { star_xy(im, 16.0f + (float)i * 16.0f, 9.5f, 2.6f, 4.8f, C(0xFFD23F)); star_xy(im, 16.0f + (float)i * 16.0f, 55.5f, 2.6f, 4.8f, C(0xFFD23F)); }
     }
     pg_img_noise(im, 4, 17);
     pg_img_ps1(im);
@@ -373,19 +402,6 @@ PG_Image *paint_wainscot(void)
         pg_img_rect(im, i * 16, 0, 2, 64, C(0xC9AE82)); pg_img_rect(im, i * 16 + 2, 0, 1, 64, alpha(C(0xFFFFFF), 160));
     }
     pg_img_noise(im, 4, 13);
-    pg_img_ps1(im);
-    return im;
-}
-
-PG_Image *paint_plank_blue(void)
-{
-    PG_Image *im = pg_img_new(64, 64, C(0x3D7FDB));
-    seed(730);
-    pg_img_gradient_v(im, 0, 0, 64, 64, C(0x4A8CE8), C(0x336FC4));
-    grain(im, C(0x1F4F9A), 100, 46, 1);
-    grain(im, C(0x7CB4FF), 50, 36, 1);
-    for (int i = 0; i < 4; i++) { pg_img_rect(im, i * 16, 0, 2, 64, C(0x24509C)); pg_img_rect(im, i * 16 + 2, 0, 1, 64, alpha(C(0xA8D0FF), 150)); }
-    pg_img_noise(im, 4, 21);
     pg_img_ps1(im);
     return im;
 }

@@ -105,10 +105,10 @@ static uint32_t pat_smiley(PG_V3 p)
     float side = p.z >= 0 ? 1.0f : -1.0f, x = p.x * side, y = p.y, rho = sqrtf(x * x + y * y);
     uint32_t c = pg_argb_lerp(C(255, 232, 96), C(255, 196, 40), rho);
     if (rho > 0.97f) return C(255, 190, 38);
-    float ex = (fabsf(x) - 0.30f) / 0.075f, ey = (y - 0.22f) / 0.125f;
+    float ex = (fabsf(x) - 0.30f) / 0.088f, ey = (y - 0.22f) / 0.145f;
     if (ex * ex + ey * ey < 1.0f) return C(96, 52, 18);
     float mx = x, my = y - 0.10f, md = sqrtf(mx * mx + my * my);
-    if (y < -0.10f && fabsf(x) < 0.47f && fabsf(md - 0.52f) < 0.045f) return C(150, 64, 24);
+    if (y < -0.10f && fabsf(x) < 0.47f && fabsf(md - 0.52f) < 0.066f) return C(150, 64, 24);
     float cx = fabsf(x) - 0.52f, cy = y + 0.14f;
     if (cx * cx + cy * cy < 0.011f) return pg_argb_lerp(c, C(255, 130, 120), 0.7f);
     return c;
@@ -121,7 +121,7 @@ static uint32_t ball_pattern(int kind, PG_V3 p, float u, float v)
     switch (kind) {
     case BT_PLAIN: {        /* tinted at draw time: a light belt so a plain ball visibly rolls */
         float d = fabsf(v - 0.5f);
-        return d < 0.07f ? C(255, 255, 255) : d < 0.095f ? C(176, 176, 186) : C(224, 224, 230);
+        return d < 0.075f ? C(255, 255, 255) : C(226, 226, 232);
     }
     case BT_BEACH:   return pat_beach(u, v);
     case BT_STRIPES: {
@@ -148,9 +148,9 @@ static uint32_t ball_pattern(int kind, PG_V3 p, float u, float v)
         local_xy(an, p, cd, &x, &y);
         return in_star(x / 0.44f, y / 0.44f, 0.48f) ? C(255, 255, 255) : C(150, 72, 222);
     case BT_HEARTS:
-        an = nearest(ico, 12, p, &cd);
+        an = nearest(oct, 6, p, &cd);
         local_xy(an, p, cd, &x, &y);
-        return in_heart(x / 0.37f, y / 0.37f + 0.12f) ? C(232, 40, 88) : C(255, 190, 210);
+        return in_heart(x / 0.50f, y / 0.50f + 0.12f) ? C(232, 40, 88) : C(255, 190, 210);
     case BT_DAISY: {
         an = nearest(oct, 6, p, &cd);
         local_xy(an, p, cd, &x, &y);
@@ -254,6 +254,7 @@ static PG_Tex paint_wood(void)
 
 static void toy_block(PG_Image *im, int x, int y, int sz, uint32_t base, int symbol)
 {
+    base = pg_argb_lerp(base, 0xFFFFFFFFu, 0.18f);                          /* pastel: the balls are the stars */
     pg_img_rect(im, x, y, sz, sz, base);
     pg_img_rect(im, x, y, sz, 2, pg_argb_lerp(base, 0xFFFFFFFFu, 0.45f));
     pg_img_rect(im, x, y, 2, sz, pg_argb_lerp(base, 0xFFFFFFFFu, 0.30f));

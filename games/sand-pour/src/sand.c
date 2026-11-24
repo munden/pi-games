@@ -50,7 +50,7 @@ static struct {
     int   hold, hold_min;
     float close_fill;
 } door;
-static int drained_n; static uint8_t drained_h[16];
+static int drained_n; static uint8_t drained_h[16]; static uint8_t drained_x[16];
 
 static double st_sim_ms, st_sim_max, st_light_ms; static long st_ticks, st_frames, st_cells;
 
@@ -126,17 +126,17 @@ static void build_level(void)
         if (y == 0 || y > SINK1 || x == 0 || x > SD_W) g[(y << 8) + x] = ID_WALL;
     /* trapdoor floor */
     for (int y = SD_H - SD_PLANK; y < SD_H; y++) for (int x = 0; x < SD_W; x++) put(x, y, ID_PLANK);
-    /* the idle funnel, top centre: 45 degree bowl and a short neck */
+    /* the idle funnel, top centre: a 45 degree bowl, four cells thick, and a short neck five cells wide */
     const int fx = SD_W / 2;
-    for (int t = 0; t < 21; t++) { for (int k = 0; k < 3; k++) { put(fx - 26 + t + k, 4 + t, ID_FUNNEL); put(fx + 24 - t + k, 4 + t, ID_FUNNEL); } }
-    for (int y = 25; y < 31; y++) for (int k = 0; k < 3; k++) { put(fx - 5 + k, y, ID_FUNNEL); put(fx + 3 + k, y, ID_FUNNEL); }
+    for (int t = 0; t < 25; t++) for (int k = 0; k < 4; k++) { put(fx - 30 + t + k, 4 + t, ID_FUNNEL); put(fx + 27 - t + k, 4 + t, ID_FUNNEL); }
+    for (int y = 29; y < 35; y++) for (int k = 0; k < 4; k++) { put(fx - 6 + k, y, ID_FUNNEL); put(fx + 3 + k, y, ID_FUNNEL); }
     /* plinko pegs */
     static const int row1[3] = { 56, 114, 172 }, row2[4] = { 27, 85, 143, 201 };
     for (int i = 0; i < 3; i++) diamond(row1[i], 56, 6, (uint8_t)(ID_PEG0 + (i * 3) % 8));
     for (int i = 0; i < 4; i++) diamond(row2[i], 82, 6, (uint8_t)(ID_PEG0 + (i * 3 + 1) % 8));
-    /* corner wedges that feed the floor */
-    for (int y = 88; y < SD_H - SD_PLANK; y++) {
-        for (int x = 0; x <= y - 88; x++) { put(x, y, ID_WEDGE); put(SD_W - 1 - x, y, ID_WEDGE); }
+    /* steep corner ramps (2 rows per column, steeper than sand can rest on) that feed the floor */
+    for (int y = 82; y < SD_H - SD_PLANK; y++) {
+        for (int x = 0; x <= (y - 82) / 2; x++) { put(x, y, ID_WEDGE); put(SD_W - 1 - x, y, ID_WEDGE); }
     }
 }
 
@@ -175,7 +175,7 @@ static void paint_static(void)
             case ID_WEDGE:
                 base = (((x + y) >> 2) & 1) ? 0xFF8F3F : 0xFFC247; f = 1.0f; break;
             case ID_FUNNEL:
-                base = (((x - y) >> 2) & 1) ? 0x3F8DF0 : 0xF4F8FF; f = 1.0f; break;
+                base = ((y >> 2) & 1) ? 0xF2544E : 0xFFF6F0; f = 1.0f; break;
             default:
                 base = peg_col[id - ID_PEG0]; break;
             }
@@ -229,7 +229,7 @@ static inline int spawn_cell(int ax, int ay, int id)
 {
     int i = (ay << 8) + ax;
     if (g[i]) return 0;
-    g[i] = (uint8_t)id; v[i] = 1; n_sand++;
+    g[i] = (uint8_t)id; v[i] = 0; n_sand++;
     mark(ax, ay);
     return 1;
 }
@@ -308,16 +308,16 @@ static void drain_sink(void)
             if (!c) continue;
             if (c < ID_STATIC) {
                 n_sand--;
-                if (drained_n < 16 && (x & 7) == 0) drained_h[drained_n++] = (uint8_t)((c - 1) >> 2);
+                if (drained_n < 16 && (x & 7) == 0) { drained_h[drained_n] = (uint8_t)((c - 1) >> 2); drained_x[drained_n++] = (uint8_t)(x - 1); }
             }
             g[i] = 0; v[i] = 0;
         }
 }
 
-int sand_drained(int *hues, int max)
+int sand_drained(int *hues, int *cols, int max)
 {
     int n = drained_n < max ? drained_n : max;
-    for (int i = 0; i < n; i++) hues[i] = drained_h[i];
+    for (int i = 0; i < n; i++) { hues[i] = drained_h[i]; cols[i] = drained_x[i]; }
     return n;
 }
 
@@ -335,23 +335,23 @@ static void row_segment(int y, int x0, int x1, int dir)
         const uint8_t c = G[i];
         if (c == 0 || c >= ID_STATIC) continue;
         visited++;
-        if (G[i + PW] == 0) {                                    /* free fall, accelerating */
-            int sp = V[i] < FALL_MAX ? V[i] + 1 : FALL_MAX;
-            int j = i + PW;
-            for (int k = 1; k < sp && G[j + PW] == 0; k++) j += PW;
-            G[j] = c; V[j] = (uint8_t)sp; G[i] = 0; V[i] = 0;
-            mark(x, y); mark(x, j >> 8);
-            continue;
-        }
+        /* a grain takes up to `sp` steps per tick (sp grows 1,2,3 while it keeps moving), every step goes down a row:
+           straight down if free, else diagonally if the side cell and the diagonal cell are both free */
+        int sp = V[i] < FALL_MAX ? V[i] + 1 : FALL_MAX;
+        int cur = i, moved = 0;
         const uint32_t r = rnd();
         const int d = (r & 1) ? 1 : -1;
-        int j = -1;
-        if (!G[i + d] && !G[i + PW + d]) j = i + PW + d;
-        else if (!G[i - d] && !G[i + PW - d]) j = i + PW - d;
-        else if (((r >> 1) & 3) == 0 && !G[i + d] && G[i + PW + d] && !G[i + 2 * d] && !G[i + PW + 2 * d]) j = i + PW + 2 * d;
-        if (j >= 0) {
-            G[j] = c; V[j] = 1; G[i] = 0; V[i] = 0;
-            mark(x, y); mark(j & 255, j >> 8);
+        for (int n = 0; n < sp; n++) {
+            if (G[cur + PW] == 0) cur += PW;
+            else if (!G[cur + d] && !G[cur + PW + d]) cur += PW + d;
+            else if (!G[cur - d] && !G[cur + PW - d]) cur += PW - d;
+            else if (n == 0 && ((r >> 1) & 3) == 0 && !G[cur + d] && G[cur + PW + d] && !G[cur + 2 * d] && !G[cur + PW + 2 * d]) cur += PW + 2 * d;
+            else break;
+            moved++;
+        }
+        if (moved) {
+            G[cur] = c; V[cur] = (uint8_t)sp; G[i] = 0; V[i] = 0;
+            mark(x, y); mark(cur & 255, cur >> 8);
         } else V[i] = 0;
     }
 }

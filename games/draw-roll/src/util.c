@@ -1,6 +1,19 @@
 /* util.c - Draw & Roll: texture upload helpers, mesh builder, rate-limited sound. */
 #include "util.h"
 
+/* --------------------------------------------------------------------- view */
+static PG_V3 view_eye = { 0.0f, 0.0f, 668.0f };
+
+void view_set(const PG_Camera *cam) { view_eye = cam->eye; }
+
+PG_V3 at_depth(float x, float y, float z)
+{
+    float k = (view_eye.z - z) / view_eye.z;          /* shrink towards the eye's axis: same screen position, nearer depth */
+    return pg_v3(view_eye.x + (x - view_eye.x) * k, view_eye.y + (y - view_eye.y) * k, z);
+}
+
+float depth_k(float z) { return (view_eye.z - z) / view_eye.z; }
+
 /* ----------------------------------------------------------------- textures */
 PG_Tex tex_finish(PG_Image *im, bool ps1)
 {

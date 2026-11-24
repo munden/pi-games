@@ -1,0 +1,5 @@
+# icon pose: the lime and lemon blobs are lifted up beside the big grape one
+drag   90 40 0 270 410 335 305
+hold  130 130 0 335 305
+drag  100 40 1 556 405 612 300
+hold  140 120 1 612 300

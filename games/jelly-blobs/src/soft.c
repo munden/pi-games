@@ -30,7 +30,7 @@
 #define K_AREA 0.55f
 #endif
 #ifndef EDGE_MAX
-#define EDGE_MAX 1.60f
+#define EDGE_MAX 1.50f
 #endif
 #ifndef EDGE_MIN
 #define EDGE_MIN 0.50f
@@ -55,6 +55,12 @@
 #endif
 #ifndef BOUNCE_K
 #define BOUNCE_K 0.55f             /* extra rebound given at the bottom of a squash, as a fraction of the impact speed */
+#endif
+#ifndef HELD_SOFT
+#define HELD_SOFT 0.16f            /* shape stiffness multiplier while a finger holds the blob: jelly in the hand is softer ... */
+#endif
+#ifndef HELD_GRAV
+#define HELD_GRAV 2.6f             /* ... and heavier, so it droops from the fingertip */
 #endif
 #ifndef REST_THR
 #define REST_THR 90.0f             /* only bounce particles that hit faster than this, px/s */
@@ -218,7 +224,7 @@ static void shape_match(SoftBlob *b, float *theta_out)
     float th = (sxx * sxx + sxy * sxy) > 1e-6f ? atan2f(sxy, sxx) : 0.0f;
     *theta_out = th;
     th = clampf(th * ROT_K, -ROT_MAX, ROT_MAX);
-    float c = cosf(th), s = sinf(th), a = b->alpha;
+    float c = cosf(th), s = sinf(th), a = b->alpha * (b->held > 0 ? HELD_SOFT : 1.0f);
     for (int i = 0; i < SB_NP; i++) {
         float qx = b->qx[i] * sx, qy = b->qy[i] * sy;
         float gx = cx + c * qx - s * qy, gy = cy + s * qx + c * qy;
@@ -454,7 +460,7 @@ void soft_slap(SoftWorld *w, float x, float y, float range, float up)
         float d = sqrtf(dx * dx + dy * dy) - b->ravg;
         if (d > range) continue;
         float k = clampf(1.0f - (d < 0 ? 0 : d) / range, 0.0f, 1.0f);
-        if (b->lowest > 14.0f) continue;                 /* only things standing on the mat feel it */
+        if (b->lowest > 14.0f || b->vcy > 120.0f) continue;   /* only things standing on the mat feel it, and only once */
         float side = clampf(dx / (fabsf(dx) + 60.0f), -1, 1) * 70.0f * k;
         soft_hop(w, i, up * (0.45f + 0.55f * k), side);
     }
@@ -479,8 +485,8 @@ static void substep(SoftWorld *w, float dt)
     /* forces */
     for (int i = 0; i < w->n; i++) {
         SoftBlob *b = &w->b[i];
-        float drag = 1.0f - DAMP_AIR * dt;
-        for (int p = 0; p < SB_NP; p++) { b->vy[p] -= GRAV * dt; b->vx[p] *= drag; b->vy[p] *= drag; }
+        float drag = 1.0f - DAMP_AIR * dt, g = GRAV * (b->held > 0 ? HELD_GRAV : 1.0f);
+        for (int p = 0; p < SB_NP; p++) { b->vy[p] -= g * dt; b->vx[p] *= drag; b->vy[p] *= drag; }
     }
     apply_grabs(w, dt);
     /* predict */
@@ -549,7 +555,7 @@ void soft_step(SoftWorld *w)
         /* goal stretch from velocity (stretch when flying, squat when told to) and the game's extra pulse */
         float ell_v = clampf(0.00022f * fabsf(b->vcy), 0.0f, 0.20f) - clampf(0.00016f * fabsf(b->vcx), 0.0f, 0.14f);
         ell_v *= b->stretch_k * (b->held ? 0.35f : 1.0f);
-        float ell_t = clampf(ell_v + b->ell_extra, -0.40f, 0.40f);
+        float ell_t = clampf(ell_v + b->ell_extra + b->ell_bias, -0.40f, 0.40f);
         b->ell += (ell_t - b->ell) * 0.30f;
         b->sy = expf(b->ell); b->sx = expf(-b->ell);
         b->ell_extra *= 0.92f;

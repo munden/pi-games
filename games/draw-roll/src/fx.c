@@ -1,7 +1,7 @@
 /* fx.c - Draw & Roll: particle pool. Stars twinkle out, confetti flutters, bubbles float up, glows swell. */
 #include "fx.h"
 
-#define MAX_P 120
+#define MAX_P 96
 
 enum { K_FREE = 0, K_STAR, K_CONFETTI, K_BUBBLE, K_GLOW };
 
@@ -60,9 +60,10 @@ void fx_burst(float x, float y, float z, int n, float speed, float hue, float sp
     for (int i = 0; i < n; i++) {
         Particle *p = alloc_p();
         float a = pg_rand_range(0.0f, PG_TAU), s = speed * pg_rand_range(0.35f, 1.0f);
-        p->kind = K_STAR; p->x = x; p->y = y; p->z = z;
+        PG_V3 q = at_depth(x, y, z);
+        p->kind = K_STAR; p->x = q.x; p->y = q.y; p->z = q.z;
         p->vx = cosf(a) * s; p->vy = sinf(a) * s + speed * 0.25f; p->vz = pg_rand_range(-20.0f, 40.0f);
-        p->max_life = p->life = pg_rand_range(0.7f, 1.25f);
+        p->max_life = p->life = pg_rand_range(0.55f, 1.0f);
         p->size = size * pg_rand_range(0.7f, 1.2f);
         p->rot = pg_rand_range(0.0f, PG_TAU); p->spin = pg_rand_range(-3.0f, 3.0f);
         p->grav = 320.0f; p->drag = 2.2f;
@@ -76,7 +77,8 @@ void fx_confetti(float x, float y, float z, int n, float speed)
     for (int i = 0; i < n; i++) {
         Particle *p = alloc_p();
         float a = pg_rand_range(0.2f, PG_PI - 0.2f), s = speed * pg_rand_range(0.4f, 1.0f);
-        p->kind = K_CONFETTI; p->x = x; p->y = y; p->z = z;
+        PG_V3 q = at_depth(x, y, z);
+        p->kind = K_CONFETTI; p->x = q.x; p->y = q.y; p->z = q.z;
         p->vx = cosf(a) * s; p->vy = sinf(a) * s; p->vz = pg_rand_range(-30.0f, 50.0f);
         p->max_life = p->life = pg_rand_range(1.0f, 1.6f);
         p->size = pg_rand_range(7.0f, 11.0f);
@@ -89,7 +91,8 @@ void fx_confetti(float x, float y, float z, int n, float speed)
 void fx_bubble(float x, float y, float z, float size, float rise)
 {
     Particle *p = alloc_p();
-    p->kind = K_BUBBLE; p->x = x; p->y = y; p->z = z;
+    PG_V3 q = at_depth(x, y, z);
+    p->kind = K_BUBBLE; p->x = q.x; p->y = q.y; p->z = q.z;
     p->vx = pg_rand_range(-14.0f, 14.0f); p->vy = rise; p->vz = 0;
     p->max_life = p->life = pg_rand_range(1.5f, 2.6f);
     p->size = size; p->rot = 0; p->spin = pg_rand_range(-0.6f, 0.6f);
@@ -100,11 +103,17 @@ void fx_bubble(float x, float y, float z, float size, float rise)
 void fx_glow(float x, float y, float z, float size, PG_Color c, float life)
 {
     Particle *p = alloc_p();
-    p->kind = K_GLOW; p->x = x; p->y = y; p->z = z;
+    PG_V3 q = at_depth(x, y, z);
+    p->kind = K_GLOW; p->x = q.x; p->y = q.y; p->z = q.z;
     p->vx = p->vy = p->vz = 0;
     p->max_life = p->life = life;
     p->size = size; p->rot = 0; p->spin = 0; p->grav = 0; p->drag = 0;
     p->color = c;
+}
+
+void fx_draw_bubble(float x, float y, float z, float size, float alpha)
+{
+    pg3d_sprite(t_bubble, pg_v3(x, y, z), size, size, 0, pg_rgba(255, 255, 255, (uint8_t)(clampf(alpha, 0.0f, 1.0f) * 225.0f)), 0);
 }
 
 void fx_update(float degrade)

@@ -1,0 +1,16 @@
+# Balloon Party scripted session. Grammar: tools/smoke.touch and docs/testing.md.
+# 1. a quiet start: balloons drift and bob, the hint hand shows up after about 2 s
+# 2. slow taps pop balloons (confetti, sparkle, bell notes); three fingers at once
+tap   100 0 506 150
+tap   128 1 660 232
+tap   130 2 265 237
+tap   132 3 770 196
+# 3. a quick swipe bats whatever it crosses; a slow drag pops what it runs into
+drag  160 18 4 60 300 900 260
+drag  176 90 5 150 120 460 160
+# 4. a tap in empty air, a long hold, a finger drawing a circle
+tap   150 6 480 480
+hold  200 50 7 700 400
+wave  190 80 8 480 250 120 1.2
+# 5. ten fingers at once, everywhere, for a while
+fuzz  215 100 10

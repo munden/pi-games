@@ -49,8 +49,8 @@ int   sand_ceiling(void);                           /* settled grains in the top
  * peak_x = the cell column of the tallest one. */
 void  sand_scan(int heights[SD_GROUPS], int *peak_x);
 
-/* grains that left through the floor during the last sand_step (hue indices), for falling-sand particles */
-int   sand_drained(int *hues, int max);
+/* a sample of the grains that left through the floor during the last sand_step: hue index and box column */
+int   sand_drained(int *hues, int *cols, int max);
 
 /* colour of a hue index for sprites/particles */
 uint32_t sand_hue_argb(int hue);

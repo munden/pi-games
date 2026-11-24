@@ -17,14 +17,16 @@ void strokes_pen_down(int pen, float x, float y, int color_idx);   /* color_idx:
 void strokes_pen_move(int pen, float x, float y);
 void strokes_pen_up(int pen);
 bool strokes_pen_active(int pen);
+void strokes_pen_set_ttl(int pen, float seconds);                   /* this stroke fades away by itself after `seconds` */
 int  strokes_pen_color(int pen);                                    /* palette index in use, -1 if none */
 int  strokes_next_color(void);                                      /* next palette index not used by another pen */
 PG_Color strokes_palette(int idx);
 
 void strokes_wipe(void);                     /* wash everything away: debris + sparkles, bodies removed at once */
-void strokes_contact(PG_Body *seg);          /* a ball hit this piece: it lights up and bulges */
+bool strokes_contact(PG_Body *seg);          /* a ball hit this piece: it lights up and bulges; true if it was not already glowing */
 int  strokes_count(void);                    /* alive (not fading) pieces */
 int  strokes_total(void);                    /* alive + fading pieces */
+int  strokes_spheres(void);                  /* pieces that draw a cap or joint sphere (statistics) */
 void strokes_add_line(const float *xy, int n, int color_idx);      /* instant polyline (used for the first ramp) */
 
 #endif

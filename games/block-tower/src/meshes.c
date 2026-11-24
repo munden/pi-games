@@ -2,6 +2,7 @@
 #include "bt.h"
 
 #include <math.h>
+#include <string.h>
 
 static PG_Vertex vtx(float x, float y, float z, float nx, float ny, float nz, float u, float v, PG_Color c)
 {
@@ -95,50 +96,61 @@ static void mesh_rot_x(PG_Mesh *m, float a)
     }
 }
 
+/* every mesh is registered so meshes_free() needs no knowledge of the struct layout */
+static PG_Mesh *reg(Meshes *m, PG_Mesh *mesh)
+{
+    if (m->n < (int)(sizeof m->all / sizeof m->all[0])) m->all[m->n++] = mesh;
+    else pg_mesh_free(mesh);
+    return mesh;
+}
+
 void meshes_build(Game *g)
 {
     Meshes *m = &g->mesh;
+    m->n = 0;
     for (int t = 0; t < T_TYPES; t++) {
         const ShapeDef *s = bt_shape(t);
-        m->shape[t] = pg_mesh_bevel_box(s->hx, s->hy, s->hz, s->bevel);
+        m->shape[t] = reg(m, pg_mesh_bevel_box(s->hx, s->hy, s->hz, s->bevel));
     }
-    m->ball = pg_mesh_sphere(1.0f, 14, 10);
-    m->quad = pg_mesh_quad(1.0f, 1.0f);
-    m->wall_tile = mesh_grid(80, 80, 4, 1);
-    m->wain_tile = mesh_grid(64, 55, 4, 1);
-    m->floor_tile = pg_mesh_floor(128, 64, 1, 4);
-    m->rug = mesh_disc_xz(1.0f, 32);
+    m->ball = reg(m, pg_mesh_sphere(1.0f, 14, 10));
+    m->quad = reg(m, pg_mesh_quad(1.0f, 1.0f));
+    m->wall_tile = reg(m, mesh_grid(80, 80, 4, 1));       /* side walls: subdivided, they are seen at an angle */
+    m->back_tile = reg(m, mesh_grid(80, 80, 1, 1));       /* back wall: parallel to the screen, no subdivision needed */
+    m->wain_tile = reg(m, mesh_grid(64, 55, 4, 1));
+    m->floor_tile = reg(m, pg_mesh_floor(128, 64, 1, 4));
+    m->rug = reg(m, mesh_disc_xz(1.0f, 32));
 
-    m->chest_body = pg_mesh_bevel_box(CHEST_HX, 58, CHEST_HZ, 6);
-    m->chest_lid = pg_mesh_bevel_box(CHEST_HX + 4, 12, CHEST_HZ + 4, 5);
-    m->chest_plate = pg_mesh_quad(CHEST_HX, 58);
-    m->btn_face = mesh_disc_xy(BTN_R - 5.0f, 28);
-    m->btn_rim = pg_mesh_torus(BTN_R - 2.0f, 6.5f, 28, 8);
+    m->chest_body = reg(m, pg_mesh_bevel_box(CHEST_HX, 58, CHEST_HZ, 6));
+    m->chest_lid = reg(m, pg_mesh_bevel_box(CHEST_HX + 4, 12, CHEST_HZ + 4, 5));
+    m->chest_plate = reg(m, pg_mesh_quad(CHEST_HX, 58));
+    m->btn_face = reg(m, mesh_disc_xy(BTN_R - 5.0f, 28));
+    m->btn_rim = reg(m, pg_mesh_torus(BTN_R - 2.0f, 6.5f, 28, 8));
     mesh_rot_x(m->btn_rim, PG_PI * 0.5f);
 
-    m->baseboard = pg_mesh_bevel_box(442, 13, 5, 3);
-    m->rail = pg_mesh_bevel_box(442, 5, 7, 2.5f);
-    m->side_base = pg_mesh_bevel_box(5, 13, 215, 3);
-    m->side_rail = pg_mesh_bevel_box(7, 5, 215, 2.5f);
-    m->sill = pg_mesh_bevel_box(114, 6, 20, 4);
-    m->frame_h = pg_mesh_bevel_box(106, 8, 9, 3);
-    m->frame_v = pg_mesh_bevel_box(8, 95, 9, 3);
-    m->bar_h = pg_mesh_bevel_box(96, 4, 5, 2);
-    m->bar_v = pg_mesh_bevel_box(4, 86, 5, 2);
-    m->rod = pg_mesh_bevel_box(122, 3, 3, 1.2f);
-    m->shelf = pg_mesh_bevel_box(135, 6, 34, 3);
-    m->bracket = pg_mesh_bevel_box(5, 17, 26, 2);
-    m->curtain = mesh_curtain(52, 206, 6);
-    m->mini = pg_mesh_bevel_box(16, 16, 16, 3);
+    m->baseboard = reg(m, pg_mesh_bevel_box(442, 13, 5, 3));
+    m->rail = reg(m, pg_mesh_bevel_box(442, 5, 7, 2.5f));
+    m->side_base = reg(m, pg_mesh_bevel_box(5, 13, 215, 3));
+    m->side_rail = reg(m, pg_mesh_bevel_box(7, 5, 215, 2.5f));
+    m->sill = reg(m, pg_mesh_bevel_box(114, 6, 20, 4));
+    m->frame_h = reg(m, pg_mesh_bevel_box(106, 8, 9, 3));
+    m->frame_v = reg(m, pg_mesh_bevel_box(8, 95, 9, 3));
+    m->bar_h = reg(m, pg_mesh_bevel_box(96, 4, 5, 2));
+    m->bar_v = reg(m, pg_mesh_bevel_box(4, 86, 5, 2));
+    m->rod = reg(m, pg_mesh_bevel_box(122, 3, 3, 1.2f));
+    m->shelf = reg(m, pg_mesh_bevel_box(135, 6, 34, 3));
+    m->bracket = reg(m, pg_mesh_bevel_box(5, 17, 26, 2));
+    m->curtain = reg(m, mesh_curtain(52, 206, 6));
+    m->mini = reg(m, pg_mesh_bevel_box(16, 16, 16, 3));
 
-    m->sph = pg_mesh_sphere(1.0f, 10, 7);
-    m->cone = pg_mesh_cone(1.0f, 1.0f, 10);
-    m->cyl = pg_mesh_cylinder(1.0f, 1.0f, 10);
-    m->torus = pg_mesh_torus(1.0f, 0.3f, 12, 6);
+    m->sph = reg(m, pg_mesh_sphere(1.0f, 9, 6));
+    m->cone = reg(m, pg_mesh_cone(1.0f, 1.0f, 10));
+    m->cyl = reg(m, pg_mesh_cylinder(1.0f, 1.0f, 10));
+    m->torus = reg(m, pg_mesh_torus(1.0f, 0.3f, 12, 6));
 }
 
 void meshes_free(Game *g)
 {
-    PG_Mesh **p = (PG_Mesh **)&g->mesh;
-    for (size_t i = 0; i < sizeof g->mesh / sizeof *p; i++) { pg_mesh_free(p[i]); p[i] = NULL; }
+    Meshes *m = &g->mesh;
+    for (int i = 0; i < m->n; i++) pg_mesh_free(m->all[i]);
+    memset(m, 0, sizeof *m);
 }

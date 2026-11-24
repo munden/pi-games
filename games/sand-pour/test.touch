@@ -1,0 +1,12 @@
+# Sand Pour scripted session (60 ticks per second): pour, sweep, circle, poke the toys, open the trapdoor, then 10 fingers at once.
+hold 10 230 0 330 120          # one finger pours steadily onto the left
+drag 20 170 1 262 108 830 108  # a second finger sweeps a rainbow ridge across the top
+hold 35 200 2 560 120          # a third pours in the middle
+wave 50 130 3 690 190 55 1.5   # a fourth draws circles
+tap 120 10 88 126              # the sun giggles
+tap 132 11 640 505             # a flower
+tap 144 12 312 500             # the beach ball
+tap 156 13 812 508             # the bucket
+hold 170 60 4 220 300          # a finger near the left wall
+tap 262 14 95 432              # the big button: the trapdoor opens
+fuzz 266 34 10                 # the whole frame: ten fingers, palms and all

@@ -23,7 +23,7 @@
 #define SB_MAX      6
 #define SB_FINGERS  17                  /* 16 touch contacts + the hint hand */
 
-#define SB_WALL_X   468.0f
+#define SB_WALL_X   452.0f
 #define SB_FLOOR_Y  (-215.0f)
 #define SB_CEIL_Y   250.0f
 
@@ -44,6 +44,7 @@ typedef struct {
 
     /* controls (set by the game) */
     float ell_extra;                                         /* extra log stretch: >0 tall, <0 squat (decays) */
+    float ell_bias;                                          /* steady log stretch, e.g. breathing (no decay) */
     float breath;                                            /* area multiplier offset, e.g. 0.02 */
     float stretch_k;                                         /* scale of velocity stretch (1 = normal) */
 

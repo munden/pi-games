@@ -13,8 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SEGS    12
-#define RINGS   6
+#define SEGS    10
+#define RINGS   7
 #define KSEGS   5
 #define KNOT_Y  1.42f            /* knot / string anchor, in balloon radii below the centre */
 #define LIFT0   205.0f           /* px/s^2 */
@@ -28,7 +28,7 @@ typedef struct {
     uint32_t gen;
     float x, y, z, vx, vy, vz;           /* world position (z = depth) and velocity */
     float r, z0;                         /* radius, preferred depth */
-    float lift_w, lift_ph, sway_a, sway_w, sway_ph, bob_ph, curl_ph;
+    float lift_w, lift_ph, float_h, home_x, sway_a, sway_w, sway_ph, bob_ph, curl_ph;
     float tilt, tiltv;                   /* roll about the view axis */
     float sq, sqv, sqa;                  /* squash amount (+stretch / -flatten), its velocity, axis angle */
     float bat_cd, bump_cd, age, grow, fade;
@@ -237,8 +237,12 @@ static int spawn(bool below)
     if (below) { b->y = c->ey - 270.0f * k - b->r * 1.6f - frand(0, 40); b->vy = 235.0f; b->grow = 1.0f; }
     else { b->y = c->ey + frand(-0.25f, 0.80f) * 270.0f * k; b->vy = frand(0, 30); b->grow = 1.0f; b->entered = true; }
     b->vx = frand(-18, 18);
-    b->lift_w = frand(0.45f, 0.95f);
-    b->lift_ph = PG_PI * 0.5f - b->lift_w * 1.8f + frand(-0.35f, 0.35f);
+    /* every balloon has its own altitude it floats at: some press against the ceiling, the rest hover at
+     * different heights (0 = bottom edge of the view, 1 = top), and that height wanders slowly */
+    b->float_h = pg_randf() < 0.38f ? 1.25f : frand(0.12f, 0.86f);
+    b->home_x = frand(-0.85f, 0.85f);                            /* and a lazy home column so the room stays balanced */
+    b->lift_w = frand(0.25f, 0.6f);
+    b->lift_ph = frand(0, PG_TAU);
     b->sway_a = frand(26.0f, 64.0f); b->sway_w = frand(0.45f, 1.05f); b->sway_ph = frand(0, PG_TAU);
     b->bob_ph = frand(0, PG_TAU); b->curl_ph = frand(0, PG_TAU);
     b->sqa = 0; b->fade = 1.0f;
@@ -294,6 +298,17 @@ static int count_active(void)
 int balloons_count(void) { return count_active(); }
 int balloon_slots(void) { return MAX_BALLOONS; }
 
+/* BP_DEBUG_BEGIN */
+void balloons_debug_dump(void)
+{
+    for (int i = 0; i < MAX_BALLOONS; i++) {
+        float sx, sy, sr;
+        if (B[i].alive && balloon_screen(i, &sx, &sy, &sr))
+            pg_log("  b%02d col=%d at (%.0f,%.0f) sr=%.0f z=%.0f v=(%.0f,%.0f) fh=%.2f%s", i, B[i].col, sx, sy, sr, B[i].z, B[i].vx, B[i].vy, B[i].float_h, B[i].retiring ? " retiring" : "");
+    }
+}
+/* BP_DEBUG_END */
+
 void balloons_update(float t)
 {
     const Cam *c = cam_get();
@@ -341,8 +356,12 @@ void balloons_update(float t)
         if (b->retiring) { b->fade -= DT / 0.8f; if (b->fade <= 0) { b->alive = false; continue; } }
         float k = view_k(b->z);
         float sxs = PG_W * 0.5f + (b->x - c->ex) / k;
-        float lift = LIFT0 * (0.38f + 0.95f * sinf(b->lift_w * b->age + b->lift_ph));
-        float ax = b->sway_a * sinf(b->sway_w * t + b->sway_ph), ay = lift;
+        float yn = (b->y - (c->ey - 270.0f * k)) / (540.0f * k);
+        float ht = b->float_h + (b->float_h > 1.0f ? 0.0f : 0.10f * sinf(b->lift_w * b->age + b->lift_ph));
+        float lift = LIFT0 * clampf(3.2f * (ht - yn), -0.55f, 1.35f);
+        float xn = (b->x - c->ex) / (480.0f * k);
+        float hx = b->home_x + 0.25f * sinf(b->lift_w * 0.8f * b->age + b->sway_ph);
+        float ax = b->sway_a * sinf(b->sway_w * t + b->sway_ph) - 62.0f * (xn - hx), ay = lift;
         if (gust_on) {
             float d = (sxs - gust_x) / 170.0f, w = expf(-d * d);
             ax += gust_dir * GUST_A * w; ay += GUST_A * 0.45f * w;
@@ -432,7 +451,7 @@ void balloons_draw(void)
             float dx = b->sx[p1] - b->sx[p0], dy = b->sy[p1] - b->sy[p0], d = sqrtf(dx * dx + dy * dy);
             if (d < 1e-4f) { dx = 0; dy = -1; d = 1; }
             float nx = -dy / d, ny = dx / d;
-            float curl = 2.6f * sinf((float)p * 1.5f + b->curl_ph) * (float)p / (float)(STR_N - 1);
+            float curl = 2.4f * sinf((float)p * 1.05f + b->curl_ph) * (float)p / (float)(STR_N - 1);
             float cx = b->sx[p] + nx * curl, cy = b->sy[p] + ny * curl;
             float w = lerpf(1.45f, 0.95f, (float)p / (float)(STR_N - 1)) * (0.7f + 0.3f * 600.0f / (cm->dist - b->z));
             PG_Color c = sc; c.a = (uint8_t)((float)al * lerpf(1.0f, 0.55f, (float)p / (float)(STR_N - 1)));
@@ -527,16 +546,6 @@ int balloon_for_hint(void)
 }
 
 /* ------------------------------------------------------------- interactions */
-void balloon_poke(int i, float sx, float sy)
-{
-    if (i < 0 || i >= MAX_BALLOONS || !B[i].alive) return;
-    Balloon *b = &B[i];
-    float bx, by;
-    if (!cam_project(b->cx, b->cy, b->z, &bx, &by)) return;
-    float dx = bx - sx, dy = -(by - sy);
-    kick(b, dx, dy, -2.6f);
-}
-
 void balloon_pop(int i)
 {
     if (i < 0 || i >= MAX_BALLOONS || !B[i].alive) return;
@@ -556,7 +565,11 @@ void balloon_pop(int i)
         o->vx += dx / d * push; o->vy += dy / d * push; o->vz += dz / d * push * 0.5f;
         kick(o, dx, dy, -3.0f * w);
     }
+#ifdef BP_DEBUG_PRIZES
+    fx_prize(p);
+#else
     if (pg_randf() < 0.20f) fx_prize(p);
+#endif
     b->alive = false;
     if (spawn_cd > 0.6f) spawn_cd = frand(0.5f, 0.95f);
 }

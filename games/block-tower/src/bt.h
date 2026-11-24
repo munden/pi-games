@@ -12,6 +12,8 @@
 #include "pg3d.h"
 #include "pg_phys.h"
 
+#include <math.h>
+
 /* ------------------------------------------------------------------ room */
 #define WALL_X      440.0f            /* inner faces of the side walls */
 #define FLOOR_Y    (-205.0f)          /* top of the floor */
@@ -29,6 +31,10 @@
 #define BTN_R        54.0f            /* button radius in world px (diameter 108 + bezel > 110 px on screen) */
 #define BTN_Y       (FLOOR_Y + 60.0f)
 #define BTN_Z       (CHEST_HZ + 7.0f)
+
+#define RAIN_V      470.0f            /* terminal speed of the raining blocks (px/s) */
+#define RAIN_A     1900.0f
+#define RAIN_TOP    (CEIL_Y + 150.0f)
 
 #define MAX_BLOCKS   48               /* boxes + balls alive at once (BOX_CAP boxes) */
 #define BOX_CAP      40
@@ -56,8 +62,21 @@ static inline const ShapeDef *bt_shape(int type)
     return &S[type];
 }
 
+static inline float bt_ball_r(int which) { return which ? 44.0f : 54.0f; }   /* the two big soft balls */
 static inline float bt_clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static inline float bt_lerpf(float a, float b, float t) { return a + (b - a) * t; }
+
+/* a raining block accelerates to RAIN_V and then falls at that speed */
+static inline float bt_fall_time(float d)
+{
+    float ta = RAIN_V / RAIN_A, sa = 0.5f * RAIN_A * ta * ta;
+    return d <= sa ? sqrtf(2.0f * d / RAIN_A) : ta + (d - sa) / RAIN_V;
+}
+static inline float bt_fall_dist(float tau)
+{
+    float ta = RAIN_V / RAIN_A, sa = 0.5f * RAIN_A * ta * ta;
+    return tau < ta ? 0.5f * RAIN_A * tau * tau : sa + RAIN_V * (tau - ta);
+}
 
 /* ----------------------------------------------------------------- state */
 typedef struct Block {
@@ -106,18 +125,20 @@ enum { PH_PLAY, PH_TIDY, PH_RAIN };
 typedef struct Textures {
     PG_Tex skin[FAM_COUNT][N_CUBE_SKINS];
     PG_Tex ball[2];
-    PG_Tex floor, wall, wainscot, rug, view, chest, chest_wood, button, glove, fabric;
+    PG_Tex floor, wall, wainscot, rug, view, chest, button, glove, fabric;
 } Textures;
 
 typedef struct Meshes {
     PG_Mesh *shape[T_TYPES];
-    PG_Mesh *ball, *quad, *grid;
+    PG_Mesh *ball, *quad, *wall_tile, *back_tile, *wain_tile;
     PG_Mesh *floor_tile, *rug;
     PG_Mesh *chest_body, *chest_lid, *chest_plate, *btn_face, *btn_rim;
-    PG_Mesh *baseboard, *rail, *side_base, *sill;
+    PG_Mesh *baseboard, *rail, *side_base, *side_rail, *sill;
     PG_Mesh *frame_h, *frame_v, *bar_h, *bar_v, *rod, *shelf, *bracket;
     PG_Mesh *curtain, *mini;
     PG_Mesh *sph, *cone, *cyl, *torus;
+    PG_Mesh *all[64];                 /* registry used by meshes_free() */
+    int n;
 } Meshes;
 
 typedef struct Game {

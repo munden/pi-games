@@ -1,0 +1,11 @@
+# Poses the scene for the launcher icon (make icon GAME=ball-pit): a full-ish pit, balls hopping, sparkles.
+tap  10 0 330 140
+tap  26 1 600 150
+tap  42 2 450 120
+tap  58 3 250 160
+tap  74 4 700 130
+tap  90 5 520 160
+tap 106 6 380 130
+tap 122 7 640 120
+tap 190 8 400 405
+tap 214 9 560 400
