@@ -16,7 +16,7 @@ game testable headless and **deterministic**. Use it properly: it is also how yo
 | `--windowed` / `--fullscreen` | desktop development; the mouse acts as one finger when there is no touch screen |
 | `--fps` | log fps and CPU ms per frame every 2 s (use this on the Pi) |
 | `--calibrate` | touch calibration for the grown-up; writes `~/.config/pi-games/touch.cal` (or `$PG_TOUCH_CAL`) |
-| `--info` | print SDL version, video driver, displays, audio devices and **touch devices** |
+| `--info` | print SDL version, video driver, displays, audio devices and **touch devices** (SDL's and the native fallback's) |
 
 At the end of a `--frames` run the SDK prints
 `[pg] done: ticks= avg_work= max_work= update= cpu3d= tris_avg= tris_max=`.
@@ -53,6 +53,7 @@ done
   The smoke fails on a non-zero exit, a `FATAL`, an exceeded triangle budget or a sanitizer report.
 - `make check SAN=1` does the same with AddressSanitizer + UBSan (own build dir `build/check-san`).
 - `tests/phys_test.c` covers the physics engine (bounce, 8-box tower, pyramid, pile, ramp, kinematic push, grab, events).
+- `tests/evdev_test.c` covers the native touch fallback with synthetic kernel multitouch events.
 - `tools/selftest.sh` covers manifests, channels, the PR scope rule and the `pg` subscribe/sync/run/prune flow.
 
 ## What headless cannot tell you (check on the device)

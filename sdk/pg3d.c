@@ -14,7 +14,13 @@
 #define NBUCKET   4096
 
 typedef struct { SDL_Vertex v[3]; float z; } Tri;
-typedef struct { float x, y, d, r, g, b, a, u, v; } TV;           /* view-space vertex with lit colour */
+typedef struct {
+    float x, y, d;          /* view space (d = distance along the view axis) */
+    float sx, sy;           /* canvas position, valid when d >= near */
+    float r, g, b, a;       /* lit colour 0..1 (kept for clipping) */
+    float u, v;             /* atlas coordinates */
+    SDL_Color col;          /* lit colour as bytes, ready for SDL */
+} TV;
 
 /* ---------------------------------------------------------------- math */
 PG_M4 pg_m4_identity(void) { PG_M4 r = {{ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 }}; return r; }
@@ -236,7 +242,27 @@ bool pg3d_plane_z(float sx, float sy, float z, PG_V3 *out)
 static inline float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 static inline uint8_t to8(float v) { return (uint8_t)(clamp01(v) * 255.0f + 0.5f); }
 
-static TV make_tv(float wx, float wy, float wz, PG_V3 n, PG_Color vc, float tr, float tg, float tb, float ta, float u, float v, unsigned flags)
+/* project once per vertex and pack the colour once per vertex: triangles then just copy */
+static inline void finish_tv(TV *t)
+{
+    if (t->d >= S.near) {
+        float inv = 1.0f / t->d;
+        t->sx = PG_W * 0.5f + t->x * inv * S.focal;
+        t->sy = PG_H * 0.5f - t->y * inv * S.focal;
+    }
+    t->col.r = to8(t->r); t->col.g = to8(t->g); t->col.b = to8(t->b); t->col.a = to8(t->a);
+}
+
+static inline void apply_fog(TV *o, unsigned flags)
+{
+    if (S.fog_on && !(flags & PG3D_NOFOG)) {
+        float f = clamp01((o->d - S.fog_s) / (S.fog_e - S.fog_s));
+        o->r = o->r * (1 - f) + S.fog_c[0] * f; o->g = o->g * (1 - f) + S.fog_c[1] * f; o->b = o->b * (1 - f) + S.fog_c[2] * f;
+    }
+}
+
+/* general path: world-space position and (unit) normal */
+static TV tv_world(float wx, float wy, float wz, PG_V3 n, PG_Color vc, float tr, float tg, float tb, float ta, float u, float v, PG_Tex tex, unsigned flags)
 {
     TV o;
     float dx = wx - S.eye.x, dy = wy - S.eye.y, dz = wz - S.eye.z;
@@ -253,15 +279,11 @@ static TV make_tv(float wx, float wy, float wz, PG_V3 n, PG_Color vc, float tr, 
         lb = S.amb_dn[2] + (S.amb_up[2] - S.amb_dn[2]) * up + S.key[2] * ndl;
         lr = lr > 1 ? 1 : lr; lg = lg > 1 ? 1 : lg; lb = lb > 1 ? 1 : lb;
     }
-    o.r = vc.r * (1.0f / 255.0f) * tr * lr;
-    o.g = vc.g * (1.0f / 255.0f) * tg * lg;
-    o.b = vc.b * (1.0f / 255.0f) * tb * lb;
+    o.r = vc.r * (1.0f / 255.0f) * tr * lr; o.g = vc.g * (1.0f / 255.0f) * tg * lg; o.b = vc.b * (1.0f / 255.0f) * tb * lb;
     o.a = vc.a * (1.0f / 255.0f) * ta;
-    if (S.fog_on && !(flags & PG3D_NOFOG)) {
-        float f = clamp01((o.d - S.fog_s) / (S.fog_e - S.fog_s));
-        o.r = o.r * (1 - f) + S.fog_c[0] * f; o.g = o.g * (1 - f) + S.fog_c[1] * f; o.b = o.b * (1 - f) + S.fog_c[2] * f;
-    }
-    o.u = u; o.v = v;
+    apply_fog(&o, flags);
+    o.u = tex.u0 + u * (tex.u1 - tex.u0); o.v = tex.v0 + v * (tex.v1 - tex.v0);
+    finish_tv(&o);
     return o;
 }
 
@@ -275,45 +297,39 @@ static Tri *alloc_tri(unsigned flags)
     return t;
 }
 
-static void fill_vertex(SDL_Vertex *o, float sx, float sy, float r, float g, float b, float a, PG_Tex tex, float u, float v)
+static inline void put_vertex(SDL_Vertex *o, const TV *t)
 {
-    o->position.x = sx; o->position.y = sy;
-    o->color.r = to8(r); o->color.g = to8(g); o->color.b = to8(b); o->color.a = to8(a);
-    o->tex_coord.x = tex.u0 + u * (tex.u1 - tex.u0);
-    o->tex_coord.y = tex.v0 + v * (tex.v1 - tex.v0);
+    o->position.x = t->sx; o->position.y = t->sy; o->color = t->col; o->tex_coord.x = t->u; o->tex_coord.y = t->v;
 }
 
-static void push_projected(const TV *a, const TV *b, const TV *c, PG_Tex tex, unsigned flags)
+static void push_tri(const TV *a, const TV *b, const TV *c, unsigned flags)
 {
-    float ax_ = PG_W * 0.5f + a->x / a->d * S.focal, ay_ = PG_H * 0.5f - a->y / a->d * S.focal;
-    float bx_ = PG_W * 0.5f + b->x / b->d * S.focal, by_ = PG_H * 0.5f - b->y / b->d * S.focal;
-    float cx_ = PG_W * 0.5f + c->x / c->d * S.focal, cy_ = PG_H * 0.5f - c->y / c->d * S.focal;
-    float area = (bx_ - ax_) * (cy_ - ay_) - (by_ - ay_) * (cx_ - ax_);
-    if (!(flags & PG3D_TWOSIDED) && area >= 0) return;               /* back-facing (screen y is down) */
-    if (area == 0) return;
-    float minx = fminf(ax_, fminf(bx_, cx_)), maxx = fmaxf(ax_, fmaxf(bx_, cx_));
-    float miny = fminf(ay_, fminf(by_, cy_)), maxy = fmaxf(ay_, fmaxf(by_, cy_));
-    if (maxx < 0 || minx > PG_W || maxy < 0 || miny > PG_H) return;
+    float area = (b->sx - a->sx) * (c->sy - a->sy) - (b->sy - a->sy) * (c->sx - a->sx);
+    if (flags & PG3D_TWOSIDED) { if (area == 0) return; }
+    else if (area >= 0) return;                                      /* back-facing (screen y is down) */
+    if ((a->sx < 0 && b->sx < 0 && c->sx < 0) || (a->sx > PG_W && b->sx > PG_W && c->sx > PG_W) ||
+        (a->sy < 0 && b->sy < 0 && c->sy < 0) || (a->sy > PG_H && b->sy > PG_H && c->sy > PG_H)) return;
     Tri *t = alloc_tri(flags);
     if (!t) return;
-    fill_vertex(&t->v[0], ax_, ay_, a->r, a->g, a->b, a->a, tex, a->u, a->v);
-    fill_vertex(&t->v[1], bx_, by_, b->r, b->g, b->b, b->a, tex, b->u, b->v);
-    fill_vertex(&t->v[2], cx_, cy_, c->r, c->g, c->b, c->a, tex, c->u, c->v);
-    t->z = (a->d + b->d + c->d) * (1.0f / 3.0f);
+    put_vertex(&t->v[0], a); put_vertex(&t->v[1], b); put_vertex(&t->v[2], c);
+    t->z = a->d + b->d + c->d;                                       /* sum: same ordering as the mean, no divide */
 }
 
 static TV tv_lerp(const TV *p, const TV *q, float t)
 {
     TV o;
+    o.sx = o.sy = 0;
     o.x = p->x + (q->x - p->x) * t; o.y = p->y + (q->y - p->y) * t; o.d = p->d + (q->d - p->d) * t;
     o.r = p->r + (q->r - p->r) * t; o.g = p->g + (q->g - p->g) * t; o.b = p->b + (q->b - p->b) * t; o.a = p->a + (q->a - p->a) * t;
     o.u = p->u + (q->u - p->u) * t; o.v = p->v + (q->v - p->v) * t;
+    finish_tv(&o);
     return o;
 }
 
-static void emit(const TV *a, const TV *b, const TV *c, PG_Tex tex, unsigned flags)
+/* clip against the near plane when needed, then push */
+static void emit(const TV *a, const TV *b, const TV *c, unsigned flags)
 {
-    if (a->d >= S.near && b->d >= S.near && c->d >= S.near) { push_projected(a, b, c, tex, flags); return; }
+    if (a->d >= S.near && b->d >= S.near && c->d >= S.near) { push_tri(a, b, c, flags); return; }
     if (a->d < S.near && b->d < S.near && c->d < S.near) return;
     const TV *in[3] = { a, b, c };
     TV poly[4]; int n = 0;
@@ -323,7 +339,7 @@ static void emit(const TV *a, const TV *b, const TV *c, PG_Tex tex, unsigned fla
         if (pin) poly[n++] = *p;
         if (pin != qin) poly[n++] = tv_lerp(p, q, (S.near - p->d) / (q->d - p->d));
     }
-    for (int i = 1; i + 1 < n; i++) push_projected(&poly[0], &poly[i], &poly[i + 1], tex, flags);
+    for (int i = 1; i + 1 < n; i++) push_tri(&poly[0], &poly[i], &poly[i + 1], flags);
 }
 
 static void mesh_impl(const PG_Mesh *m, PG_Tex tex, const PG_M4 *model, PG_Color tint, unsigned flags)
@@ -331,18 +347,81 @@ static void mesh_impl(const PG_Mesh *m, PG_Tex tex, const PG_M4 *model, PG_Color
     static TV tv[MAXV];
     if (!m || m->nv > MAXV) return;
     const float *M = model->m;
-    float tr = tint.r * (1.0f / 255.0f), tg = tint.g * (1.0f / 255.0f), tb = tint.b * (1.0f / 255.0f), ta = tint.a * (1.0f / 255.0f);
+    const float c0[3] = { M[0], M[1], M[2] }, c1[3] = { M[4], M[5], M[6] }, c2[3] = { M[8], M[9], M[10] };
+    const PG_V3 R = S.right, U = S.up, F = S.fwd;
+    /* model -> view in one 3x4: view_axis = basis . (M v + t - eye) */
+    const float rx0 = R.x * c0[0] + R.y * c0[1] + R.z * c0[2], rx1 = R.x * c1[0] + R.y * c1[1] + R.z * c1[2], rx2 = R.x * c2[0] + R.y * c2[1] + R.z * c2[2];
+    const float uy0 = U.x * c0[0] + U.y * c0[1] + U.z * c0[2], uy1 = U.x * c1[0] + U.y * c1[1] + U.z * c1[2], uy2 = U.x * c2[0] + U.y * c2[1] + U.z * c2[2];
+    const float fd0 = F.x * c0[0] + F.y * c0[1] + F.z * c0[2], fd1 = F.x * c1[0] + F.y * c1[1] + F.z * c1[2], fd2 = F.x * c2[0] + F.y * c2[1] + F.z * c2[2];
+    const float tx = M[12] - S.eye.x, ty = M[13] - S.eye.y, tz = M[14] - S.eye.z;
+    const float ox = R.x * tx + R.y * ty + R.z * tz, oy = U.x * tx + U.y * ty + U.z * tz, od = F.x * tx + F.y * ty + F.z * tz;
+
+    /* whole-mesh rejection with a bounding sphere */
+    float s0 = sqrtf(c0[0] * c0[0] + c0[1] * c0[1] + c0[2] * c0[2]), s1 = sqrtf(c1[0] * c1[0] + c1[1] * c1[1] + c1[2] * c1[2]), s2 = sqrtf(c2[0] * c2[0] + c2[1] * c2[1] + c2[2] * c2[2]);
+    float smax = fmaxf(s0, fmaxf(s1, s2)), smin = fminf(s0, fminf(s1, s2));
+    PG_Mesh *mm = (PG_Mesh *)m;
+    if (mm->radius <= 0) {
+        float r2 = 0;
+        for (int i = 0; i < m->nv; i++) { float d2 = m->v[i].x * m->v[i].x + m->v[i].y * m->v[i].y + m->v[i].z * m->v[i].z; if (d2 > r2) r2 = d2; }
+        mm->radius = sqrtf(r2) + 0.001f;
+    }
+    float rad = m->radius * smax;
+    if (od + rad < S.near) return;
+    if (od > rad * 1.05f) {      /* conservative: magnify by the sphere's NEAREST depth, not its centre depth */
+        float inv = S.focal / od, px = PG_W * 0.5f + ox * inv, py = PG_H * 0.5f - oy * inv, pr = rad * S.focal / (od - rad);
+        if (px + pr < 0 || px - pr > PG_W || py + pr < 0 || py - pr > PG_H) return;
+    }
+
+    const float tr = tint.r * (1.0f / 255.0f), tg = tint.g * (1.0f / 255.0f), tb = tint.b * (1.0f / 255.0f), ta = tint.a * (1.0f / 255.0f);
+    const float du = tex.u1 - tex.u0, dv = tex.v1 - tex.v0;
+    const bool lit = !(flags & PG3D_UNLIT), two = (flags & PG3D_TWOSIDED) != 0;
+    const bool fog = S.fog_on && !(flags & PG3D_NOFOG);
+    const bool uniform = (smax - smin) < 0.002f * smax && smax > 1e-6f;
+
+    /* uniform scale: light the vertex normal in MODEL space (no per-vertex normal transform or normalise) */
+    float Lm0 = 0, Lm1 = 0, Lm2 = 0, Um0 = 0, Um1 = 0, Um2 = 0;
+    if (lit && uniform) {
+        float is = 1.0f / s0;
+        Lm0 = (c0[0] * S.ldir.x + c0[1] * S.ldir.y + c0[2] * S.ldir.z) * is;
+        Lm1 = (c1[0] * S.ldir.x + c1[1] * S.ldir.y + c1[2] * S.ldir.z) * is;
+        Lm2 = (c2[0] * S.ldir.x + c2[1] * S.ldir.y + c2[2] * S.ldir.z) * is;
+        Um0 = c0[1] * is; Um1 = c1[1] * is; Um2 = c2[1] * is;
+    }
+    const float kr = S.key[0], kg = S.key[1], kb = S.key[2];
+    const float dr = S.amb_dn[0], dg = S.amb_dn[1], db = S.amb_dn[2];
+    const float sr = S.amb_up[0] - dr, sg = S.amb_up[1] - dg, sb = S.amb_up[2] - db;
+    const float near = S.near, focal = S.focal;
+
     for (int i = 0; i < m->nv; i++) {
         const PG_Vertex *v = &m->v[i];
-        float wx = M[0] * v->x + M[4] * v->y + M[8] * v->z + M[12];
-        float wy = M[1] * v->x + M[5] * v->y + M[9] * v->z + M[13];
-        float wz = M[2] * v->x + M[6] * v->y + M[10] * v->z + M[14];
-        PG_V3 n = pg_v3(M[0] * v->nx + M[4] * v->ny + M[8] * v->nz, M[1] * v->nx + M[5] * v->ny + M[9] * v->nz, M[2] * v->nx + M[6] * v->ny + M[10] * v->nz);
-        float l2 = n.x * n.x + n.y * n.y + n.z * n.z;
-        if (l2 > 1e-12f) { float il = 1.0f / sqrtf(l2); n.x *= il; n.y *= il; n.z *= il; }
-        tv[i] = make_tv(wx, wy, wz, n, v->c, tr, tg, tb, ta, v->u, v->v, flags);
+        TV *o = &tv[i];
+        o->x = rx0 * v->x + rx1 * v->y + rx2 * v->z + ox;
+        o->y = uy0 * v->x + uy1 * v->y + uy2 * v->z + oy;
+        o->d = fd0 * v->x + fd1 * v->y + fd2 * v->z + od;
+        float lr = 1, lg = 1, lb = 1;
+        if (lit) {
+            float ndl, up;
+            if (uniform) {
+                ndl = v->nx * Lm0 + v->ny * Lm1 + v->nz * Lm2;
+                up = 0.5f * (v->nx * Um0 + v->ny * Um1 + v->nz * Um2) + 0.5f;
+            } else {
+                float wx = c0[0] * v->nx + c1[0] * v->ny + c2[0] * v->nz, wy = c0[1] * v->nx + c1[1] * v->ny + c2[1] * v->nz, wz = c0[2] * v->nx + c1[2] * v->ny + c2[2] * v->nz;
+                float l2 = wx * wx + wy * wy + wz * wz, il = l2 > 1e-12f ? 1.0f / sqrtf(l2) : 1.0f;
+                ndl = (wx * S.ldir.x + wy * S.ldir.y + wz * S.ldir.z) * il;
+                up = wy * il * 0.5f + 0.5f;
+            }
+            ndl = two ? fabsf(ndl) : (ndl < 0 ? 0 : ndl);
+            lr = dr + sr * up + kr * ndl; lg = dg + sg * up + kg * ndl; lb = db + sb * up + kb * ndl;
+            lr = lr > 1 ? 1 : lr; lg = lg > 1 ? 1 : lg; lb = lb > 1 ? 1 : lb;
+        }
+        o->r = v->c.r * (1.0f / 255.0f) * tr * lr; o->g = v->c.g * (1.0f / 255.0f) * tg * lg; o->b = v->c.b * (1.0f / 255.0f) * tb * lb;
+        o->a = v->c.a * (1.0f / 255.0f) * ta;
+        if (fog) apply_fog(o, flags);
+        o->u = tex.u0 + v->u * du; o->v = tex.v0 + v->v * dv;
+        if (o->d >= near) { float inv = 1.0f / o->d; o->sx = PG_W * 0.5f + o->x * inv * focal; o->sy = PG_H * 0.5f - o->y * inv * focal; }
+        o->col.r = to8(o->r); o->col.g = to8(o->g); o->col.b = to8(o->b); o->col.a = to8(o->a);
     }
-    for (int i = 0; i + 2 < m->ni; i += 3) emit(&tv[m->idx[i]], &tv[m->idx[i + 1]], &tv[m->idx[i + 2]], tex, flags);
+    for (int i = 0; i + 2 < m->ni; i += 3) emit(&tv[m->idx[i]], &tv[m->idx[i + 1]], &tv[m->idx[i + 2]], flags);
 }
 
 static void tri_impl(PG_Tex tex, const PG_Vertex *a, const PG_Vertex *b, const PG_Vertex *c, unsigned flags)
@@ -351,9 +430,10 @@ static void tri_impl(PG_Tex tex, const PG_Vertex *a, const PG_Vertex *b, const P
     TV tv[3];
     for (int i = 0; i < 3; i++) {
         const PG_Vertex *v = vs[i];
-        tv[i] = make_tv(v->x, v->y, v->z, pg_v3(v->nx, v->ny, v->nz), v->c, 1, 1, 1, 1, v->u, v->v, flags);
+        PG_V3 n = pg_v3(v->nx, v->ny, v->nz);
+        tv[i] = tv_world(v->x, v->y, v->z, n, v->c, 1, 1, 1, 1, v->u, v->v, tex, flags);
     }
-    emit(&tv[0], &tv[1], &tv[2], tex, flags);
+    emit(&tv[0], &tv[1], &tv[2], flags);
 }
 
 static void sprite_internal(PG_Tex tex, PG_V3 pos, float w, float h, float roll, PG_Color tint, unsigned flags, float bias)
@@ -361,32 +441,35 @@ static void sprite_internal(PG_Tex tex, PG_V3 pos, float w, float h, float roll,
     PG_V3 d = pg_v3_sub(pos, S.eye);
     float depth = pg_v3_dot(d, S.fwd);
     if (depth - bias < S.near) return;
-    float cx = PG_W * 0.5f + pg_v3_dot(d, S.right) / depth * S.focal;
-    float cy = PG_H * 0.5f - pg_v3_dot(d, S.up) / depth * S.focal;
-    float k = S.focal / depth, hw = w * 0.5f * k, hh = h * 0.5f * k;
+    float inv = 1.0f / depth;
+    float cx = PG_W * 0.5f + pg_v3_dot(d, S.right) * inv * S.focal;
+    float cy = PG_H * 0.5f - pg_v3_dot(d, S.up) * inv * S.focal;
+    float k = S.focal * inv, hw = w * 0.5f * k, hh = h * 0.5f * k;
     if (cx + hw + hh < 0 || cx - hw - hh > PG_W || cy + hw + hh < 0 || cy - hw - hh > PG_H) return;
-    float cs = cosf(roll), sn = sinf(roll);
-    static const float ux[4] = { 0, 1, 1, 0 }, uy[4] = { 0, 0, 1, 1 };
-    static const float qx[4] = { -1, 1, 1, -1 }, qy[4] = { -1, -1, 1, 1 };
     float r = tint.r * (1.0f / 255.0f), g = tint.g * (1.0f / 255.0f), b = tint.b * (1.0f / 255.0f), a = tint.a * (1.0f / 255.0f);
     if (S.fog_on && !(flags & (PG3D_NOFOG | PG3D_ADDITIVE))) {
         float f = clamp01((depth - S.fog_s) / (S.fog_e - S.fog_s));
         r = r * (1 - f) + S.fog_c[0] * f; g = g * (1 - f) + S.fog_c[1] * f; b = b * (1 - f) + S.fog_c[2] * f;
     }
+    SDL_Color col = { to8(r), to8(g), to8(b), to8(a) };
+    float cs = 1, sn = 0;
+    if (roll != 0) { cs = cosf(roll); sn = sinf(roll); }
     SDL_Vertex vv[4];
+    static const float ux[4] = { 0, 1, 1, 0 }, uy[4] = { 0, 0, 1, 1 }, qx[4] = { -1, 1, 1, -1 }, qy[4] = { -1, -1, 1, 1 };
     for (int i = 0; i < 4; i++) {
         float lx = qx[i] * hw, ly = qy[i] * hh;
-        fill_vertex(&vv[i], cx + lx * cs - ly * sn, cy + lx * sn + ly * cs, r, g, b, a, tex, ux[i], uy[i]);
+        vv[i].position.x = cx + lx * cs - ly * sn; vv[i].position.y = cy + lx * sn + ly * cs;
+        vv[i].color = col;
+        vv[i].tex_coord.x = ux[i] ? tex.u1 : tex.u0; vv[i].tex_coord.y = uy[i] ? tex.v1 : tex.v0;
     }
     static const int ix[6] = { 0, 1, 2, 0, 2, 3 };
     for (int q = 0; q < 2; q++) {
         Tri *t = alloc_tri(flags);
         if (!t) return;
-        for (int k = 0; k < 3; k++) t->v[k] = vv[ix[q * 3 + k]];
-        t->z = depth - bias;
+        for (int kk = 0; kk < 3; kk++) t->v[kk] = vv[ix[q * 3 + kk]];
+        t->z = (depth - bias) * 3.0f;
     }
 }
-
 
 static void shadow_impl(float x, float floor_y, float z, float radius, float alpha)
 {
@@ -395,9 +478,9 @@ static void shadow_impl(float x, float floor_y, float z, float radius, float alp
     TV t[4];
     unsigned fl = PG3D_BG | PG3D_UNLIT | PG3D_TWOSIDED | PG3D_NOFOG;
     for (int i = 0; i < 4; i++)
-        t[i] = make_tv(x + cx[i] * radius, floor_y, z + cz[i] * radius, pg_v3(0, 1, 0), pg_rgb(255, 255, 255), 1, 1, 1, alpha, u[i], v[i], fl);
-    emit(&t[0], &t[1], &t[2], tex, fl);
-    emit(&t[0], &t[2], &t[3], tex, fl);
+        t[i] = tv_world(x + cx[i] * radius, floor_y, z + cz[i] * radius, pg_v3(0, 1, 0), pg_rgb(255, 255, 255), 1, 1, 1, alpha, u[i], v[i], tex, fl);
+    emit(&t[0], &t[1], &t[2], fl);
+    emit(&t[0], &t[2], &t[3], fl);
 }
 
 static void shine_impl(PG_V3 c, float radius, float strength)

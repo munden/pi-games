@@ -13,6 +13,8 @@ for g in "$@"; do
         echo "SMOKE FAILED (exit code): $g"; cat "$out"; rc=1
     elif grep -Eq 'FATAL|budget exceeded|runtime error|AddressSanitizer' "$out"; then
         echo "SMOKE FAILED (bad output): $g"; cat "$out"; rc=1
+    elif tm=$(sed -n 's/.*tris_max=\([0-9]*\).*/\1/p' "$out"); [ -n "$tm" ] && [ "$tm" -gt 10000 ]; then
+        echo "SMOKE FAILED (triangle budget: tris_max=$tm > 10000, AGENTS.md section 5): $g"; rc=1
     else
         echo "smoke ok: $g  $(grep -o 'update=[0-9.]*ms cpu3d=[0-9.]*ms tris_avg=[0-9]* tris_max=[0-9]*' "$out")"
     fi

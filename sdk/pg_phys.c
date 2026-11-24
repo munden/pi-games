@@ -292,40 +292,98 @@ static float bound_r(const PG_Body *b)
     }
 }
 
+/* Broad phase: a uniform grid over the small bodies (cell >= 2 * the largest small radius, so touching bodies are always in
+ * neighbouring cells) plus a short list of "big" bodies (floors, walls, large blocks) tested against everything.
+ * Candidates for each body i are collected and sorted so pairs are still visited in (i, j) order: the contact list stays
+ * sorted for warm-start matching and the simulation is identical to the brute-force version. */
+#define GRID_MAX 4096
+#define BIG_R    80.0f
+static void try_pair(PG_World *w, int i, int j, const float *br, int *p)
+{
+    PG_Body *a = &w->bodies[i], *b = &w->bodies[j];
+    if (a->inv_mass == 0 && b->inv_mass == 0) return;
+    float dx = b->x - a->x, dy = b->y - a->y, rs = br[i] + br[j];
+    if (dx * dx + dy * dy > rs * rs) return;
+    Contact c[2];
+    int n = collide(a, b, c);
+    if (n == 0 || w->ncur >= MAX_ARB) return;
+    Arbiter *ar = &w->cur[w->ncur++];
+    ar->ia = i; ar->ib = j; ar->n = n; ar->fresh = true;
+    ar->friction = sqrtf(a->friction * b->friction);
+    ar->restitution = a->restitution > b->restitution ? a->restitution : b->restitution;
+    for (int k = 0; k < n; k++) { ar->c[k] = c[k]; ar->c[k].pn = ar->c[k].pt = 0; }
+    while (*p < w->nprev && (w->prev[*p].ia < i || (w->prev[*p].ia == i && w->prev[*p].ib < j))) (*p)++;
+    if (*p < w->nprev && w->prev[*p].ia == i && w->prev[*p].ib == j) {
+        ar->fresh = false;
+        for (int k = 0; k < n; k++)
+            for (int q = 0; q < w->prev[*p].n; q++)
+                if (w->prev[*p].c[q].feature == ar->c[k].feature) { ar->c[k].pn = w->prev[*p].c[q].pn; ar->c[k].pt = w->prev[*p].c[q].pt; break; }
+    }
+}
+
 static void broadphase(PG_World *w)
 {
     static float br[PG_PHYS_MAX_BODIES];
-    int np = 0;
-    for (int i = 0; i < w->high; i++) br[i] = w->bodies[i].alive ? bound_r(&w->bodies[i]) : 0.0f;
-    int p = 0;
+    static int head[GRID_MAX], next[PG_PHYS_MAX_BODIES], cellof[PG_PHYS_MAX_BODIES], big[PG_PHYS_MAX_BODIES];
+    int nbig = 0, nsmall = 0;
+    float rmax = 8.0f, minx = 1e30f, maxx = -1e30f, miny = 1e30f, maxy = -1e30f;
     w->ncur = 0;
     for (int i = 0; i < w->high; i++) {
-        PG_Body *a = &w->bodies[i];
-        if (!a->alive) continue;
-        for (int j = i + 1; j < w->high; j++) {
-            PG_Body *b = &w->bodies[j];
-            if (!b->alive) continue;
-            if (a->inv_mass == 0 && b->inv_mass == 0) continue;
-            float dx = b->x - a->x, dy = b->y - a->y, rs = br[i] + br[j];
-            if (dx * dx + dy * dy > rs * rs) continue;
-            Contact c[2];
-            int n = collide(a, b, c);
-            if (n == 0 || w->ncur >= MAX_ARB) { if (n && w->ncur >= MAX_ARB) np++; continue; }
-            Arbiter *ar = &w->cur[w->ncur++];
-            ar->ia = i; ar->ib = j; ar->n = n; ar->fresh = true;
-            ar->friction = sqrtf(a->friction * b->friction);
-            ar->restitution = a->restitution > b->restitution ? a->restitution : b->restitution;
-            for (int k = 0; k < n; k++) { ar->c[k] = c[k]; ar->c[k].pn = ar->c[k].pt = 0; }
-            while (p < w->nprev && (w->prev[p].ia < i || (w->prev[p].ia == i && w->prev[p].ib < j))) p++;
-            if (p < w->nprev && w->prev[p].ia == i && w->prev[p].ib == j) {
-                ar->fresh = false;
-                for (int k = 0; k < n; k++)
-                    for (int q = 0; q < w->prev[p].n; q++)
-                        if (w->prev[p].c[q].feature == ar->c[k].feature) { ar->c[k].pn = w->prev[p].c[q].pn; ar->c[k].pt = w->prev[p].c[q].pt; break; }
-            }
+        const PG_Body *b = &w->bodies[i];
+        br[i] = b->alive ? bound_r(b) : 0.0f;
+        if (!b->alive) continue;
+        if (br[i] > BIG_R) { big[nbig++] = i; continue; }
+        nsmall++;
+        if (br[i] > rmax) rmax = br[i];
+        if (b->x < minx) minx = b->x;
+        if (b->x > maxx) maxx = b->x;
+        if (b->y < miny) miny = b->y;
+        if (b->y > maxy) maxy = b->y;
+    }
+    float cs = 2.0f * rmax;
+    int gx = 1, gy = 1;
+    if (nsmall > 0) {
+        for (;;) {
+            gx = (int)((maxx - minx) / cs) + 1; gy = (int)((maxy - miny) / cs) + 1;
+            if (gx * gy <= GRID_MAX && gx < 4096 && gy < 4096) break;
+            cs *= 2.0f;
+        }
+        for (int c = 0; c < gx * gy; c++) head[c] = -1;
+        for (int i = w->high - 1; i >= 0; i--) {                         /* descending so each cell list ends up ascending */
+            const PG_Body *b = &w->bodies[i];
+            if (!b->alive || br[i] > BIG_R) { cellof[i] = -1; continue; }
+            int cx = (int)((b->x - minx) / cs), cy = (int)((b->y - miny) / cs);
+            cx = cx < 0 ? 0 : cx >= gx ? gx - 1 : cx; cy = cy < 0 ? 0 : cy >= gy ? gy - 1 : cy;
+            int c = cy * gx + cx;
+            cellof[i] = c; next[i] = head[c]; head[c] = i;
         }
     }
-    (void)np;
+    int p = 0;
+    uint64_t mark[PG_PHYS_MAX_BODIES / 64];
+    const int words = (w->high + 63) / 64;
+    for (int i = 0; i < w->high; i++) {
+        const PG_Body *a = &w->bodies[i];
+        if (!a->alive) continue;
+        if (br[i] > BIG_R) {                                              /* big body: everything after it, already ascending */
+            for (int j = i + 1; j < w->high; j++) if (w->bodies[j].alive) try_pair(w, i, j, br, &p);
+            continue;
+        }
+        /* mark the neighbours with a higher index in a bitmap, then walk the bits: candidates come out sorted for free */
+        for (int k = 0; k < words; k++) mark[k] = 0;
+        int c = cellof[i], cx = c % gx, cy = c / gx;
+        for (int yy = cy - 1; yy <= cy + 1; yy++) {
+            if (yy < 0 || yy >= gy) continue;
+            for (int xx = cx - 1; xx <= cx + 1; xx++) {
+                if (xx < 0 || xx >= gx) continue;
+                for (int j = head[yy * gx + xx]; j >= 0; j = next[j]) if (j > i) mark[j >> 6] |= (uint64_t)1 << (j & 63);
+            }
+        }
+        for (int k = 0; k < nbig; k++) if (big[k] > i) mark[big[k] >> 6] |= (uint64_t)1 << (big[k] & 63);
+        for (int k = i >> 6; k < words; k++) {
+            uint64_t bits = mark[k];
+            while (bits) { int j = (k << 6) + __builtin_ctzll(bits); bits &= bits - 1; try_pair(w, i, j, br, &p); }
+        }
+    }
 }
 
 static inline void apply_imp(PG_Body *a, PG_Body *b, float px, float py, float r1x, float r1y, float r2x, float r2y)

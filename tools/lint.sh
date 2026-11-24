@@ -22,7 +22,8 @@ scan() {  # scan <label> <regex> <files...>
     done
 }
 scan "forbidden include" "$pat_inc" $(find $dirs sdk -type f \( -name '*.c' -o -name '*.h' \))
-scan "forbidden call" "$pat_call" $(find $dirs sdk -type f \( -name '*.c' -o -name '*.h' \))
+scan "forbidden call" "$pat_call" $(find $dirs sdk -type f \( -name '*.c' -o -name '*.h' \) ! -path 'sdk/pg_evdev.c')
+scan "forbidden call" "$(echo "$pat_call" | sed 's/|ioctl//')" sdk/pg_evdev.c   # the native touch reader may use ioctl (EVIOCG*) and nothing else on the list
 # 3. games never pick the video driver, create windows, present, or exit the process
 scan "the SDK owns init/window/present/exit" 'SDL_VIDEODRIVER|SDL_HINT_RENDER_DRIVER|SDL_CreateWindow|SDL_Init[[:space:]]*\(|SDL_Quit[[:space:]]*\(|(^|[^a-zA-Z_])exit[[:space:]]*\(|abort[[:space:]]*\(|SDL_CreateRenderer|SDL_RenderPresent|SDL_GL_' $(find games -type f \( -name '*.c' -o -name '*.h' \))
 # 4. size budgets: no big files in a game directory (everything is procedural), icon <= 400 KB

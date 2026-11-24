@@ -78,6 +78,11 @@ $(BUILD)/tests/phys_test: tests/phys_test.c sdk/pg_phys.c sdk/pg_phys.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(OPT) $(WARN) $(SANFLAGS) -Isdk tests/phys_test.c sdk/pg_phys.c -o $@ $(LDFLAGS) -lm
 
+# touch fallback parser test: needs SDL headers and SDL_GetTicks only
+$(BUILD)/tests/evdev_test: tests/evdev_test.c sdk/pg_evdev.c sdk/pg_internal.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(OPT) $(WARN) $(SANFLAGS) -Isdk $(SDL_CFLAGS) tests/evdev_test.c -o $@ $(LDFLAGS) $(SDL_LIBS)
+
 # ---------------------------------------------------------------- games
 # A game is games/<id>/game.ini + games/<id>/src/*.c. No per-game Makefile: the build is shared on purpose.
 define GAME_RULES
@@ -104,8 +109,9 @@ lint:
 validate: tools
 	@$(BUILD)/tools/pgcat --root . validate $(GAMES)
 
-test: $(BUILD)/tests/phys_test tools
+test: $(BUILD)/tests/phys_test $(BUILD)/tests/evdev_test tools
 	@$(BUILD)/tests/phys_test
+	@$(BUILD)/tests/evdev_test
 	@if [ -x tools/selftest.sh ]; then tools/selftest.sh $(BUILD); fi
 
 smoke: games

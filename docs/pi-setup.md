@@ -46,6 +46,11 @@ powered hub. Verify: `dmesg | tail`, `ls /dev/input/by-id`, `sudo apt install ev
 print `ABS_MT_POSITION_X/Y` events), and `build/games/<id>/<id> --info` should list a touch device. If it says none
 are found, check the cable and group membership (`input`).
 
+If SDL itself reports no touch device, the runtime automatically tries reading `/dev/input/event*` directly
+(multitouch protocol B from `hid-multitouch`, or a plain single-touch digitiser) and logs
+`evdev fallback: reading touch device ...`; it switches off again if SDL later finds one. `--info` shows both views.
+Set `PG_NO_EVDEV=1` to disable the fallback. Both need read access to `/dev/input` (group `input`).
+
 Calibrate once (the frame sits on top of the monitor and is rarely perfectly aligned):
 
 ```sh

@@ -35,7 +35,7 @@ static struct {
     SDL_Texture   *canvas;
     SDL_Surface   *hsurf;               /* headless render surface */
     bool headless, fullscreen, windowed, show_fps, calibrate, info_only;
-    bool vsync, mouse_touch, quit, kms, seed_set;
+    bool vsync, mouse_touch, quit, kms, seed_set, evdev;
     uint32_t max_frames, seed;
     const char *script_path, *shot_path, *icon_path;
     uint64_t tick;
@@ -376,8 +376,21 @@ static void update_metrics(void)
     G.dest.y = ((float)G.out_h - G.dest.h) * 0.5f;
 }
 
+/* fallback touch source (pg_evdev.c): same pipeline as SDL finger events */
+static void evdev_inject(int kind, int64_t id, float nx, float ny)
+{
+    int64_t fid = id + 5000000;
+    if (kind == PG_INJECT_DOWN) touch_down(fid, nx, ny, true);
+    else if (kind == PG_INJECT_MOVE) touch_move(fid, nx, ny, true);
+    else touch_up(fid, nx, ny, true);
+}
+
 static void pump_events(void)
 {
+    if (G.evdev) {
+        if (SDL_GetNumTouchDevices() > 0) { pg_evdev_stop(evdev_inject); G.evdev = false; pg_log("SDL now sees a touch device; native evdev fallback off"); }
+        else pg_evdev_poll(evdev_inject);
+    }
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
         switch (ev.type) {
@@ -656,7 +669,11 @@ static int do_info(void)
     int nt = SDL_GetNumTouchDevices();
     printf("touch devices: %d\n", nt);
     for (int i = 0; i < nt; i++) { const char *n = SDL_GetTouchName(i); printf("  touch %d: %s\n", i, n ? n : "?"); }
-    if (nt == 0) printf("  (none found: check the USB cable and that this user is in the 'input' group)\n");
+    pg_evdev_start();
+    int ne = pg_evdev_count();
+    printf("native evdev touch devices (fallback reader): %d\n", ne);
+    pg_evdev_stop(NULL);
+    if (nt == 0 && ne == 0) printf("  (none found: check the USB cable and that this user is in the 'input' group)\n");
     SDL_Quit();
     return 0;
 }
@@ -836,6 +853,11 @@ int pg_run(const PG_Game *game, int argc, char **argv)
     pg_gfx_init(G.ren);
     pg3d_init(G.ren);
     pg_audio_init(G.headless);
+    if (!G.headless && !getenv("PG_NO_EVDEV") && SDL_GetNumTouchDevices() == 0) {
+        pg_log("SDL reports no touch device; trying to read /dev/input directly (set PG_NO_EVDEV=1 to disable)");
+        pg_evdev_start();
+        G.evdev = true;
+    }
     if (G.script_path) script_load(G.script_path);
 
     int rc = 0;
@@ -852,6 +874,7 @@ int pg_run(const PG_Game *game, int argc, char **argv)
         if (g->shutdown) g->shutdown();
     }
 
+    if (G.evdev) pg_evdev_stop(NULL);
     pg_audio_shutdown();
     pg3d_shutdown();
     pg_gfx_shutdown();

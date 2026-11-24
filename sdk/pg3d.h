@@ -61,7 +61,7 @@ PG_Tex pg3d_builtin(int which);                       /* soft disc, dark soft sh
 
 /* ----------------------------------------------------------------- meshes */
 typedef struct { float x, y, z, nx, ny, nz, u, v; PG_Color c; } PG_Vertex;   /* u,v in 0..1 over the texture */
-typedef struct { PG_Vertex *v; uint16_t *idx; int nv, ni; } PG_Mesh;          /* ni = 3 per triangle, CCW from outside */
+typedef struct { PG_Vertex *v; uint16_t *idx; int nv, ni; float radius; } PG_Mesh;   /* ni = 3 per triangle, CCW from outside; radius = bounding sphere about the origin, filled on first draw */
 
 PG_Mesh *pg_mesh_new(int nv, int ni);
 void     pg_mesh_free(PG_Mesh *m);
