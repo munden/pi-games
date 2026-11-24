@@ -27,7 +27,8 @@ _Static_assert(MAX_BALLOONS <= 32, "the touch tracker keeps one bit per balloon 
 typedef struct {
     uint32_t inside;                         /* bit per balloon slot the finger was inside last tick */
     int      trail;                          /* counts ticks of fast movement to space the sparkle trail */
-    int      still;                          /* ticks the contact has hardly moved */
+    int      still;                          /* ticks the contact has stayed near its anchor point */
+    float    ax, ay;                         /* the anchor: where the contact settled (IR contacts jitter a little) */
 } Track;
 
 static Track trk[PG_MAX_TOUCH];
@@ -50,7 +51,7 @@ static float finger_hue(const PG_Touch *t) { return fmodf(30.0f + 47.0f * (float
 
 static void touch_down(const PG_Touch *t, Track *k)
 {
-    k->inside = 0; k->trail = 0; k->still = 0;
+    k->inside = 0; k->trail = 0; k->still = 0; k->ax = t->x; k->ay = t->y;
     for (int j = 0; j < balloon_slots(); j++) if (balloon_contains(j, t->x, t->y, HIT_PAD)) k->inside |= 1u << j;
     int pz = fx_prize_hit(t->x, t->y);
     if (pz >= 0) { fx_prize_pop(pz); return; }
@@ -72,7 +73,8 @@ static void touch_held(const PG_Touch *t, Track *k)
     float spd = sqrtf(t->vx * t->vx + t->vy * t->vy);
     bool fast = spd > BAT_SPEED;
 
-    k->still = hypotf(t->x - t->px, t->y - t->py) < 0.4f ? k->still + 1 : 0;
+    if (hypotf(t->x - k->ax, t->y - k->ay) < 8.0f) k->still++;          /* within 8 px of where it settled */
+    else { k->ax = t->x; k->ay = t->y; k->still = 0; }
     if (k->still > STILL_TICKS) return;                       /* a resting palm or a stuck beam: ignore */
 
     uint32_t now_in = 0;

@@ -1,16 +1,17 @@
 /* balloon.c - the balloons: mesh, buoyancy simulation, strings, picking, popping and batting.
  *
- * The simulation is my own small 3D one (<= 28 soft spheres, O(n^2) = ~400 pair tests per tick):
- *   - buoyancy: a constant lift that breathes slowly per balloon (so they drift up, hover, sink a little),
- *     linear air drag -> a gentle terminal speed; weak sideways sway; a travelling gust now and then;
+ * The simulation is a small 3D one of my own (<= 28 soft spheres, O(n^2) = ~400 pair tests per tick):
+ *   - buoyancy: every balloon has its own altitude it floats up to (about a third press against the ceiling, the
+ *     rest hover at different heights) and that altitude wanders slowly, so the room never settles into a jam;
+ *     linear air drag gives a gentle terminal speed; weak sideways sway plus a lazy home column keep them spread;
+ *     a travelling gust now and then;
  *   - soft sphere collisions (restitution 0.5, only for real impacts) -> they bump and jiggle;
- *   - the view box is the ceiling and the side walls; there is no floor: new balloons float up from below;
+ *   - the view box is the ceiling and the side walls; there is no hard floor: new balloons float up from below;
  *   - squash-and-stretch is a damped spring per balloon along an impact axis, applied in the model matrix;
  *   - strings are 6-point verlet chains drawn as thin quads in ONE dynamic mesh.
  * Everything is fixed-size, nothing allocates after init. */
 #include "bp.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #define SEGS    10
@@ -31,7 +32,7 @@ typedef struct {
     float lift_w, lift_ph, float_h, home_x, sway_a, sway_w, sway_ph, bob_ph, curl_ph;
     float tilt, tiltv;                   /* roll about the view axis */
     float sq, sqv, sqa;                  /* squash amount (+stretch / -flatten), its velocity, axis angle */
-    float bat_cd, bump_cd, age, grow, fade;
+    float bat_cd, bump_cd, age, fade;
     PG_M4 M;
     float cx, cy;                        /* drawn centre (with the little bob) */
     float kx, ky;                        /* knot / string anchor */
@@ -48,7 +49,7 @@ static int   cap = MAX_BALLOONS, cap_tick, last_col = -1;
 
 /* --------------------------------------------------------------------- mesh */
 /* Egg-shaped balloon profile at unit radius, theta 0 = top pole, pi = bottom: rho is the distance from the
- * axis, y the height. Slightly wider on top and tapering to the neck, 1.15 tall like the brief asks. */
+ * axis, y the height. Slightly wider on top and tapering to the neck, 1.15 times taller than wide. */
 static void profile(float th, float *rho, float *y, float *nr, float *ny)
 {
     float s = sinf(th), c = cosf(th), sm = (1.0f - c) * 0.5f, K = 1.07f;
@@ -174,7 +175,7 @@ static void compute_model(Balloon *b, float t)
 {
     float a = clampf(1.0f + b->sq, 0.62f, 1.55f), bs = 1.0f / sqrtf(a), k = a - bs;
     float dx = cosf(b->sqa), dy = sinf(b->sqa), c = cosf(b->tilt), s = sinf(b->tilt);
-    float u = b->r * b->grow * (b->retiring ? 0.25f + 0.75f * smooth01(b->fade) : 1.0f);
+    float u = b->r * (b->retiring ? 0.25f + 0.75f * smooth01(b->fade) : 1.0f);
     float p = dx * c + dy * s, q = -dx * s + dy * c;
     float c0x = bs * c + k * dx * p, c0y = bs * s + k * dy * p;
     float c1x = -bs * s + k * dx * q, c1y = bs * c + k * dy * q;
@@ -234,8 +235,8 @@ static int spawn(bool below)
     float k = view_k(b->z);
     spawn_phase += 0.618034f; spawn_phase -= floorf(spawn_phase);
     b->x = c->ex + (spawn_phase * 2.0f - 1.0f) * 0.80f * 480.0f * k;
-    if (below) { b->y = c->ey - 270.0f * k - b->r * 1.25f - frand(0, 24); b->vy = 280.0f; b->grow = 1.0f; }
-    else { b->y = c->ey + frand(-0.25f, 0.80f) * 270.0f * k; b->vy = frand(0, 30); b->grow = 1.0f; b->entered = true; }
+    if (below) { b->y = c->ey - 270.0f * k - b->r * 1.25f - frand(0, 24); b->vy = 280.0f; }
+    else { b->y = c->ey + frand(-0.25f, 0.80f) * 270.0f * k; b->vy = frand(0, 30); b->entered = true; }
     b->vx = frand(-18, 18);
     /* every balloon has its own altitude it floats at: some press against the ceiling, the rest hover at
      * different heights (0 = bottom edge of the view, 1 = top), and that height wanders slowly */
@@ -428,7 +429,7 @@ void balloons_draw(void)
         pg3d_mesh(m_balloon, t_balloon, &b->M, bal_color(b->col, al), 0);
 
         /* gloss: the SDK's soft shine plus a crisp window reflection, both riding on the lit side */
-        float u = b->r * b->grow * (b->retiring ? 0.25f + 0.75f * smooth01(b->fade) : 1.0f);
+        float u = b->r * (b->retiring ? 0.25f + 0.75f * smooth01(b->fade) : 1.0f);
         PG_V3 ctr = pg_v3(b->cx, b->cy, b->z);
         pg3d_shine(ctr, u, 0.55f * (float)al / 255.0f);
         PG_V3 toc = pg_v3_norm(pg_v3_sub(cm->pg.eye, ctr));
@@ -472,7 +473,7 @@ bool balloon_screen(int i, float *sx, float *sy, float *sr)
     if (i < 0 || i >= MAX_BALLOONS || !B[i].alive) return false;
     const Balloon *b = &B[i];
     if (!cam_project(b->cx, b->cy, b->z, sx, sy)) return false;
-    *sr = b->r * b->grow * cam_scale(b->z);
+    *sr = b->r * cam_scale(b->z);
     return true;
 }
 
@@ -554,7 +555,7 @@ void balloon_pop(int i)
     if (i < 0 || i >= MAX_BALLOONS || !B[i].alive) return;
     Balloon *b = &B[i];
     PG_V3 p = pg_v3(b->cx, b->cy, b->z);
-    float u = b->r * b->grow;
+    float u = b->r;
     fx_pop(p, b->col, u);
     snd_pop(b->col, b->r);
     /* the burst of air shoves close neighbours away and makes them wobble */
