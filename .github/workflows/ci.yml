@@ -1,0 +1,35 @@
+name: ci
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libsdl2-dev
+      - name: Check (lint, manifests, -Werror build, unit tests, tooling self-test, headless smoke)
+        run: make check
+      - name: Check under AddressSanitizer + UBSan
+        run: make check SAN=1
+      - name: Screenshots for review
+        run: |
+          for g in $(ls games | grep -v '^_'); do make shot GAME=$g; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build/shots/*.png
+          if-no-files-found: ignore
+
+  scope:
+    if: github.event_name == 'pull_request' && github.actor != github.repository_owner
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: One game per pull request, nothing outside it
+        run: git diff --name-only "origin/${{ github.base_ref }}...HEAD" | tools/check-scope.sh

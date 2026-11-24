@@ -1,0 +1,2 @@
+# Maintainer-only. One game id per line. A game may be listed in at most one channel file.
+# stable: reviewed, tested on the real Pi + touch frame, safe to hand to the child.

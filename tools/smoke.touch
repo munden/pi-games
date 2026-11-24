@@ -1,0 +1,11 @@
+# Default scripted touches for headless smoke tests and screenshots.
+# Format: see docs/testing.md.   tap T SLOT X Y | hold T DUR SLOT X Y | drag T DUR SLOT X0 Y0 X1 Y1
+#         wave T DUR SLOT CX CY R TURNS | down/move/up T SLOT X Y | fuzz T DUR N
+tap   20 0 480 270
+tap   40 1 300 200
+tap   60 2 700 320
+drag  80 50 0 200 400 760 200
+drag  90 60 1 800 120 160 420
+wave 140 90 2 480 270 140 1.5
+hold 150 60 3 480 400
+fuzz 200 100 10

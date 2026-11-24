@@ -1,0 +1,3 @@
+# Maintainer-only. One game id per line. A game may be listed in at most one channel file.
+# community: merged and reviewed, but not yet verified on the device.
+# Games listed in neither file are in the implicit "incubating" channel.

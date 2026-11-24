@@ -1,0 +1,179 @@
+#!/bin/sh
+# pg - subscribe to games from this repository, build them, and install them for a launcher.
+#
+#   pg list [@channel]            games in this checkout, with channel and whether you are subscribed
+#   pg channels                   channel names
+#   pg subscribe TOKEN...         TOKEN is a game id or @channel (e.g. @stable)
+#   pg unsubscribe TOKEN...
+#   pg subscriptions              show what you are subscribed to
+#   pg sync [--no-pull] [--no-prune]   git pull, build subscribed games, install them, prune the rest
+#   pg installed                  what is installed
+#   pg run ID [game options]      run an installed game (cwd = its install directory)
+#   pg catalog                    JSON catalog of every valid game in this checkout
+#   pg validate [ID...]           check manifests (CI uses this)
+#   pg env                        show paths
+#
+# The contract other programs (launchers) rely on is documented in docs/subscribing.md.
+# Needs: sh, git, make, gcc, pkg-config, libsdl2-dev. Safe to run as a normal user.
+set -eu
+
+self=$(readlink -f "$0" 2>/dev/null || echo "$0")
+ROOT=${PG_REPO:-$(cd "$(dirname "$self")/.." && pwd)}
+PG_HOME=${PG_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pi-games}
+SUBS=$PG_HOME/subscriptions
+INSTALLED=$PG_HOME/installed
+BUILD=${PG_BUILD:-$ROOT/build/pg}
+PGCAT=$BUILD/tools/pgcat
+
+# on a Raspberry Pi, tune the build for the Cortex-A53 unless the caller said otherwise
+if [ -z "${PG_MAKE_ARGS+x}" ] && grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null; then PG_MAKE_ARGS="PI=1"; fi
+
+die()  { echo "pg: $*" >&2; exit 1; }
+warn() { echo "pg: warning: $*" >&2; }
+
+ensure_pgcat() {
+    if [ ! -x "$PGCAT" ] || [ "$ROOT/tools/pgcat.c" -nt "$PGCAT" ]; then
+        make -C "$ROOT" --no-print-directory BUILD="$BUILD" tools >/dev/null || die "could not build pgcat (is gcc installed?)"
+    fi
+}
+cat_() { ensure_pgcat; "$PGCAT" --root "$ROOT" "$@"; }
+
+subs_tokens() {
+    [ -f "$SUBS" ] || return 0
+    sed 's/#.*//' "$SUBS" | awk 'NF { print $1 }'
+}
+
+# ids the current subscriptions resolve to (unknown tokens are reported on stderr)
+subscribed_ids() {
+    tokens=$(subs_tokens)
+    [ -n "$tokens" ] || return 0
+    # shellcheck disable=SC2086
+    cat_ ids $tokens || true
+}
+
+ini_get() { sed -n "s/^$2[[:space:]]*=[[:space:]]*//p" "$1" | head -n 1; }
+
+cmd_list() {
+    sel=$(subscribed_ids 2>/dev/null || true)
+    printf '%-3s %-18s %-8s %-10s %-8s %s\n' "" ID VERSION CHANNEL TESTED NAME
+    cat_ list "$@" | while IFS='	' read -r id ver ch tested name; do
+        mark="[ ]"; echo "$sel" | grep -qx "$id" && mark="[x]"
+        printf '%-3s %-18s %-8s %-10s %-8s %s\n' "$mark" "$id" "$ver" "$ch" "$tested" "$name"
+    done
+}
+
+cmd_subscribe() {
+    [ $# -gt 0 ] || die "usage: pg subscribe <id|@channel>..."
+    mkdir -p "$PG_HOME"; touch "$SUBS"
+    for t in "$@"; do
+        cat_ ids "$t" >/dev/null || die "unknown game or channel: $t"
+        if grep -qxF "$t" "$SUBS"; then echo "already subscribed: $t"; else echo "$t" >> "$SUBS"; echo "subscribed: $t"; fi
+    done
+}
+
+cmd_unsubscribe() {
+    [ $# -gt 0 ] || die "usage: pg unsubscribe <id|@channel>..."
+    [ -f "$SUBS" ] || return 0
+    for t in "$@"; do
+        if grep -qxF "$t" "$SUBS"; then grep -vxF "$t" "$SUBS" > "$SUBS.new" || true; mv "$SUBS.new" "$SUBS"; echo "unsubscribed: $t"
+        else echo "not subscribed: $t"; fi
+    done
+}
+
+install_game() {
+    id=$1
+    src=$ROOT/games/$id; exe=$BUILD/games/$id/$id; dst=$INSTALLED/$id; tmp=$INSTALLED/.tmp.$id.$$
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    cp "$exe" "$tmp/$id"; chmod 755 "$tmp/$id"
+    cp "$src/game.ini" "$src/icon.bmp" "$tmp/"
+    [ -f "$src/README.md" ] && cp "$src/README.md" "$tmp/"
+    commit=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    {
+        echo "version=$(ini_get "$src/game.ini" version)"
+        echo "commit=$commit"
+        echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "sdk_api=$(ini_get "$src/game.ini" sdk_api)"
+    } > "$tmp/.pg-installed"
+    if [ -d "$dst" ]; then mv "$dst" "$dst.old.$$"; fi
+    mv "$tmp" "$dst"
+    rm -rf "$dst.old.$$"
+}
+
+write_index() {
+    out=$INSTALLED/index.tsv.new
+    : > "$out"
+    for d in "$INSTALLED"/*/; do
+        [ -f "$d/.pg-installed" ] || continue
+        id=$(basename "$d")
+        printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$(ini_get "$d/game.ini" version)" "$(ini_get "$d/game.ini" name)" "$(ini_get "$d/game.ini" players)" "$d" >> "$out"
+    done
+    mv "$out" "$INSTALLED/index.tsv"
+}
+
+cmd_sync() {
+    pull=1; prune=1
+    for a in "$@"; do
+        case $a in --no-pull) pull=0;; --no-prune) prune=0;; *) die "unknown option $a";; esac
+    done
+    [ -f "$SUBS" ] || die "no subscriptions yet: run 'pg subscribe <id|@channel>'"
+    if [ "$pull" = 1 ] && [ -d "$ROOT/.git" ]; then
+        git -C "$ROOT" pull --ff-only || warn "git pull failed; using what is checked out"
+    fi
+    ids=$(subscribed_ids) || true
+    mkdir -p "$INSTALLED"
+    rc=0; good=""
+    for id in $ids; do
+        if cat_ validate "$id" >/dev/null 2>"$PG_HOME/.validate.err"; then good="$good $id"
+        else warn "skipping $id: $(head -n 1 "$PG_HOME/.validate.err")"; rc=1; fi
+    done
+    rm -f "$PG_HOME/.validate.err"
+    installed_now=""
+    for id in $good; do
+        echo "== $id"
+        # shellcheck disable=SC2086
+        if make -C "$ROOT" --no-print-directory BUILD="$BUILD" GAME="$id" ${PG_MAKE_ARGS:-} games >/dev/null; then
+            install_game "$id"; installed_now="$installed_now $id"; echo "installed $id"
+        else warn "build of $id failed; keeping any previously installed copy"; rc=1; installed_now="$installed_now $id"; fi
+    done
+    if [ "$prune" = 1 ]; then
+        for d in "$INSTALLED"/*/; do
+            [ -f "$d/.pg-installed" ] || continue
+            id=$(basename "$d")
+            case " $installed_now $ids " in *" $id "*) ;; *) echo "removing $id (no longer subscribed)"; rm -rf "$d";; esac
+        done
+    fi
+    write_index
+    echo "sync done: $(ls -d "$INSTALLED"/*/ 2>/dev/null | wc -l | tr -d ' ') game(s) installed in $INSTALLED"
+    return $rc
+}
+
+cmd_installed() {
+    [ -f "$INSTALLED/index.tsv" ] || { echo "nothing installed (pg subscribe ..., pg sync)"; return 0; }
+    awk -F'\t' '{ printf "%-18s %-8s %s\n", $1, $2, $3 }' "$INSTALLED/index.tsv"
+}
+
+cmd_run() {
+    [ $# -ge 1 ] || die "usage: pg run <id> [game options]"
+    id=$1; shift
+    [ -x "$INSTALLED/$id/$id" ] || die "$id is not installed (pg subscribe $id; pg sync)"
+    cd "$INSTALLED/$id"
+    exec "./$id" "$@"
+}
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+case $cmd in
+    list)          cmd_list "$@";;
+    channels)      cat_ channels;;
+    subscribe)     cmd_subscribe "$@";;
+    unsubscribe)   cmd_unsubscribe "$@";;
+    subscriptions) [ -f "$SUBS" ] && cat "$SUBS" || echo "(none)";;
+    sync)          cmd_sync "$@";;
+    installed)     cmd_installed;;
+    run)           cmd_run "$@";;
+    catalog)       cat_ catalog;;
+    validate)      cat_ validate "$@";;
+    env)           echo "repo:      $ROOT"; echo "home:      $PG_HOME"; echo "installed: $INSTALLED"; echo "build:     $BUILD";;
+    help|-h|--help) sed -n '2,17p' "$self" | sed 's/^# \{0,1\}//';;
+    *)             die "unknown command '$cmd' (try: pg help)";;
+esac
