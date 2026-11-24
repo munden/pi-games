@@ -162,6 +162,9 @@ static void ball_end_body(Ball *b)
 static void ball_poof(Ball *b)
 {
     if (b->state != B_ALIVE) return;
+#ifdef DR_STATS
+    pg_log("poof %u at tick %llu x=%.0f y=%.0f age=%.1f still=%.1f", b->serial, (unsigned long long)pg_ticks(), b->x, b->y, b->age, b->still);
+#endif
     ball_end_body(b);
     b->state = B_POOF; b->anim = 0.0f;
     fx_burst(b->x, b->y, 24.0f, 5, 130.0f, 50.0f + (float)b->pattern * 40.0f, 40.0f, 15.0f);
@@ -169,6 +172,9 @@ static void ball_poof(Ball *b)
 
 static void ball_swallow(Ball *b)
 {
+#ifdef DR_STATS
+    pg_log("eaten %u at tick %llu x=%.0f", b->serial, (unsigned long long)pg_ticks(), b->x);
+#endif
     ball_end_body(b);
     b->state = B_SWALLOW; b->anim = 0.0f;
     toys_bucket_eat(b->x, b->y);
@@ -233,6 +239,9 @@ void balls_update(float degrade)
             b->age += PG_DT;
             float sp = p->vx * p->vx + p->vy * p->vy;
             b->still = sp < 18.0f * 18.0f ? b->still + PG_DT : 0.0f;
+#ifdef DR_STATS
+            if ((pg_ticks() & 1) == 0) pg_log("ballpos %u %llu %.1f %.1f %.0f", b->serial, (unsigned long long)pg_ticks(), b->x, b->y, sqrtf(sp));
+#endif
             if (b->y < RIM_Y - 14.0f && fabsf(b->x) < MOUTH_X + 6.0f) ball_swallow(b);
             else if (b->y < -340.0f || b->y > 520.0f || fabsf(b->x) > 560.0f || b->still > 6.0f || b->age > 50.0f) ball_poof(b);
         } else if (b->state == B_SWALLOW) {

@@ -279,7 +279,7 @@ void toys_render_shadows(void)
     const unsigned fl = PG3D_BG | PG3D_UNLIT | PG3D_NOFOG;
     PG_Tex disc = pg3d_builtin(PG3D_TEX_SHADOW);
     float bob = sinf(T.t * 1.9f) * 5.0f;
-    PG_M4 m = pg_m4_trs2(disp_x() * 1.06f + 18.0f, DISP_Y + bob - 30.0f, BACK_Z + 1.0f, 0, 150.0f, 74.0f, 1.0f);
+    PG_M4 m = pg_m4_trs2(disp_x() + 14.0f, DISP_Y + bob - 30.0f, BACK_Z + 1.0f, 0, 150.0f, 74.0f, 1.0f);
     pg3d_mesh(m_quad, disc, &m, pg_rgba(255, 255, 255, 105), fl);
     m = pg_m4_trs2(30.0f, -218.0f, BACK_Z + 1.0f, 0, 190.0f, 82.0f, 1.0f);
     pg3d_mesh(m_quad, disc, &m, pg_rgba(255, 255, 255, 120), fl);

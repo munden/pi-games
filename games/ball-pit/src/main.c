@@ -74,6 +74,7 @@ static Drop      dq[DROP_Q];
 static BackBall  back[BACK_BALLS];
 static int       n_back, live_cap = MAX_BALLS, recent[4] = { -1, -1, -1, -1 };
 static uint32_t  seq_counter;
+static uint64_t  chime_tick;
 static float     idle_t = 7.5f, rain_cd = 1.0f, spawn_gate;
 static float     hint_a, hint_x, hint_y, hint_phase;
 static PG_Body  *hint_body;
@@ -337,7 +338,7 @@ static void drops_update(void)
             continue;
         }
         if (ball_new(x, y, pg_rand_range(-30, 30), -260.0f, r, true)) {
-            pg_sfx_chime(d->note, d->vol);
+            if (d->vol > 0 && pg_ticks() - chime_tick >= 7) { pg_sfx_chime(d->note, d->vol); chime_tick = pg_ticks(); }
             spark_add(SP_RING, x, y, 30, 0, 0, 0.45f, 120, 50);
             for (int k = 0; k < 3; k++) spark_add(SP_STAR, x, y, 40, pg_rand_range(-120, 120), pg_rand_range(-60, 90), 0.7f, 20, pg_rand_range(0, 360));
         }
@@ -411,6 +412,7 @@ static void finger_step(int i, const PG_Touch *t)
             if (f->pour) {                                /* empty space: three balls drop in a little rising tune */
                 int n0 = note_for_x(tx);
                 pg_sfx_chime(n0, 0.50f);                  /* heard on the very next frame; the balls follow */
+                chime_tick = pg_ticks();
                 for (int k = 0; k < 3; k++) {
                     int note = n0 + k * 2 > 9 ? 9 - (n0 + k * 2 - 9) % 3 : n0 + k * 2;
                     queue_drop(tx, 0.13f * (float)k, note, k ? 0.50f : 0.0f);
@@ -481,6 +483,9 @@ static void after_step(void)
         Ball *b = &balls[i];
         if (b->state == B_LIVE) {
             PG_Body *bd = b->body;
+            if (!isfinite(bd->x) || !isfinite(bd->y) || !isfinite(bd->vx) || !isfinite(bd->vy)) {   /* cannot happen; never trust it */
+                bd->x = 0; bd->y = CEIL_Y - b->r - 8; bd->vx = bd->vy = bd->w = 0;
+            }
             if (bd->x < -WALL_X - 4)       { bd->x = -WALL_X + b->r; if (bd->vx < 0) bd->vx = 0; }      /* nothing ever leaves the tub */
             else if (bd->x > WALL_X + 4)   { bd->x = WALL_X - b->r;  if (bd->vx > 0) bd->vx = 0; }
             if (bd->y < FLOOR_Y - 4)       { bd->y = FLOOR_Y + b->r; if (bd->vy < 0) bd->vy = 0; }
@@ -617,7 +622,7 @@ static void draw_backdrop(float tm)
     }
 }
 
-static void draw_balls(float tm)
+static void draw_balls(void)
 {
     PG_Tex shadow = pg3d_builtin(PG3D_TEX_SHADOW);
     for (int i = 0; i < POOL; i++) {
@@ -640,7 +645,6 @@ static void draw_balls(float tm)
         float low = (y - b->r - FLOOR_Y) / 170.0f;
         if (b->state == B_LIVE && low < 1.0f) pg3d_blob_shadow(x + 6, FLOOR_Y + 0.8f, 8, b->r * 1.08f, 0.50f * (1.0f - clampf(low, 0, 1)));
     }
-    (void)tm;
 }
 
 static void draw_lip(void)
@@ -710,7 +714,7 @@ static void render(SDL_Renderer *r)
     cam_now = cam;
     pg3d_begin(&cam);
     draw_backdrop(tm);
-    draw_balls(tm);
+    draw_balls();
     draw_lip();
     draw_fx(tm);
     pg3d_end(r);
